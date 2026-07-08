@@ -1,3 +1,5 @@
+import ProcessTabs from "./components/ProcessTabs";
+import asIsProcess from "../data/asIsProcess.json";
 
 export default function Home() {
   return (
@@ -7,6 +9,9 @@ export default function Home() {
       </h1>
       <hr className="w-[80%]" />
 
+      <div className="w-full max-w-6xl flex flex-col gap-4 mt-4">
+        <ProcessTabs asIsProcess={asIsProcess} />
+      </div>
     </div>
   );
 }
