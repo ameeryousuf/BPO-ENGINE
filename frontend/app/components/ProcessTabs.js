@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import BpmnViewer from "./BpmnViewer";
 import QuantitativeAnalysis from "./QuantitativeAnalysis";
+import { generateBpmnXml } from "../lib/bpmnXmlGenerator";
 
 const TABS = ["AS-IS", "TO-BE"];
 
@@ -37,6 +38,13 @@ export default function ProcessTabs({ asIsProcess }) {
   }
 
   const activeData = activeTab === "AS-IS" ? asIsProcess : toBeData;
+  // Some process records (e.g. the newer source schema) don't carry a
+  // bpmn_xml diagram — reconstruct one from gateways/process_task so the
+  // viewer still has something to render.
+  const diagramXml = useMemo(
+    () => activeData.bpmn_xml || generateBpmnXml(activeData),
+    [activeData]
+  );
 
   return (
     <div className="w-full flex flex-col gap-4">
@@ -81,7 +89,7 @@ export default function ProcessTabs({ asIsProcess }) {
       )}
 
       <h2 className="text-lg font-semibold">{activeData.process_name}</h2>
-      <BpmnViewer xml={activeData.bpmn_xml} />
+      <BpmnViewer xml={diagramXml} />
       <QuantitativeAnalysis processData={activeData} />
     </div>
   );

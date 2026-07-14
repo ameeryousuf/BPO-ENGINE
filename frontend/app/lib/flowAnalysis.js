@@ -19,6 +19,15 @@
 // on the sequence flow.
 
 import { parseBpmnXml } from "./bpmnGraph";
+import { buildProcessGraphFromJson } from "./processGraph";
+
+// Prefer the authored BPMN diagram when present; fall back to reconstructing
+// the graph from `gateways` + `process_task` for records (like the newer
+// source schema) that don't carry a `bpmn_xml` string.
+function resolveGraph(processData) {
+  if (processData?.bpmn_xml) return parseBpmnXml(processData.bpmn_xml);
+  return buildProcessGraphFromJson(processData);
+}
 
 function minutesToHours(min) {
   return (Number(min) || 0) / 60;
@@ -326,7 +335,7 @@ function modeOf(values) {
 
 export function runFlowAnalysis(processData) {
   const notes = [];
-  const { nodes, edges } = parseBpmnXml(processData.bpmn_xml);
+  const { nodes, edges } = resolveGraph(processData);
   const taskDataById = buildTaskDataMap(processData);
 
   const taskMetrics = new Map(); // nodeId -> {ct, pt, cost, loads, resources}
