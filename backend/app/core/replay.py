@@ -140,20 +140,32 @@ def _serialize_gateways(g: nx.DiGraph, gateway_lookup: dict, process_id) -> list
         gw["after_task_id"] = pred if pred_kind == "task" else None
         gw["after_gateway_id"] = id_map[pred] if pred_kind == "gateway" else None
 
+        node_branches = attrs.get("branches")
+        if node_branches is not None:
+            # Explicit branch list is the source of truth: it preserves
+            # sibling branches even when two of them target the same node
+            # (e.g. two conditions both leading straight to END), which a
+            # plain DiGraph edge cannot represent since it allows only one
+            # edge per (source, target) pair.
+            targets = [(b["target"], b.get("condition"), b.get("probability")) for b in node_branches]
+        else:
+            targets = [(v, edata.get("condition"), edata.get("probability"))
+                       for _, v, edata in g.out_edges(n, data=True)]
+
         branches = []
-        for _, v, edata in g.out_edges(n, data=True):
-            v_kind = g.nodes[v].get("kind")
+        for target, condition, probability in targets:
+            target_kind = g.nodes[target].get("kind")
             branches.append({
                 "id": None,
                 "gateway_pk_id": gid,
                 "is_default": False,
-                "target_task_id": v if v_kind == "task" else None,
-                "target_gateway_id": id_map[v] if v_kind == "gateway" else None,
-                "condition": edata.get("condition"),
+                "target_task_id": target if target_kind == "task" else None,
+                "target_gateway_id": id_map[target] if target_kind == "gateway" else None,
+                "condition": condition,
                 "end_event_name": None,
                 "end_task_id": None,
                 "connect_to_end": True,
-                "probability": edata.get("probability"),
+                "probability": probability,
             })
         gw["branches"] = branches
         gateways.append(gw)

@@ -15,6 +15,10 @@ from app.exceptions import InvalidProcessDefinitionError
 
 logger = logging.getLogger(__name__)
 
+MAX_TASKS = 200
+PROBABILITY_TOLERANCE = 0.01
+NEGATIVE_TIME_FIELDS = ("expected_process_time", "expected_rework_time", "expected_waiting_time")
+
 
 def load_process(json_path: "str | Path") -> dict:
     """Load a process definition from a JSON file on disk.
@@ -26,11 +30,35 @@ def load_process(json_path: "str | Path") -> dict:
         return json.load(f)
 
 
+def _coerce_float(value: Any, error_message: str) -> float:
+    """Cast ``value`` to float, raising a clear, named error on failure.
+
+    Handles the common case of numeric fields (percentages, rates,
+    probabilities, durations) arriving as strings from upstream systems.
+    """
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise InvalidProcessDefinitionError(error_message) from exc
+
+
 def validate_process_definition(data: Any) -> None:
-    """Validate that ``data`` has the minimal shape required to build a graph.
+    """Validate ``data`` and coerce its numeric fields in place.
+
+    Checks the minimal shape required to build a graph, that every
+    gateway reference resolves to a real task/gateway, that gateway
+    branch probabilities sum to ~1.0, that task IDs are unique, that
+    time fields are non-negative, and that numeric fields which commonly
+    arrive as strings (``time_allocation_percentage``, ``hourlyRate``,
+    branch ``probability``) are valid numbers. Values that pass the
+    numeric checks are coerced to ``float`` in place so downstream code
+    never has to re-parse them.
 
     Raises ``InvalidProcessDefinitionError`` with a human-readable message
-    describing the first problem found.
+    naming the offending field/task/gateway, describing the first problem
+    found.
     """
     if not isinstance(data, dict):
         raise InvalidProcessDefinitionError("Process definition must be a JSON object.")
@@ -39,21 +67,120 @@ def validate_process_definition(data: Any) -> None:
     if not isinstance(tasks, list) or len(tasks) == 0:
         raise InvalidProcessDefinitionError("Process definition must contain a non-empty 'process_task' list.")
 
+    if len(tasks) > MAX_TASKS:
+        raise InvalidProcessDefinitionError(
+            f"Process definition has {len(tasks)} tasks, which exceeds the maximum of {MAX_TASKS}."
+        )
+
+    task_ids: set = set()
     for i, pt in enumerate(tasks):
         if not isinstance(pt, dict):
             raise InvalidProcessDefinitionError(f"process_task[{i}] must be an object.")
         if "task_id" not in pt:
             raise InvalidProcessDefinitionError(f"process_task[{i}] is missing required field 'task_id'.")
+        task_id = pt["task_id"]
+        if task_id in task_ids:
+            raise InvalidProcessDefinitionError(f"Duplicate task_id {task_id!r} found in process_task.")
+        task_ids.add(task_id)
         if not isinstance(pt.get("task"), dict):
             raise InvalidProcessDefinitionError(f"process_task[{i}] is missing required object field 'task'.")
+
+        task = pt["task"]
+        for field in NEGATIVE_TIME_FIELDS:
+            if field not in task or task[field] is None:
+                continue
+            value = _coerce_float(
+                task[field],
+                f"Invalid numeric value for field '{field}' on task {task_id}: {task[field]!r}.",
+            )
+            if value < 0:
+                raise InvalidProcessDefinitionError(
+                    f"Task {task_id} field '{field}' must not be negative (got {value})."
+                )
+            task[field] = value
+
+        for jt in task.get("jobTasks") or []:
+            if "time_allocation_percentage" in jt and jt["time_allocation_percentage"] is not None:
+                raw = jt["time_allocation_percentage"]
+                jt["time_allocation_percentage"] = _coerce_float(
+                    raw,
+                    f"Invalid numeric value for field 'time_allocation_percentage' on task {task_id}: {raw!r}.",
+                )
+            job = jt.get("job")
+            if isinstance(job, dict) and "hourlyRate" in job and job["hourlyRate"] is not None:
+                raw = job["hourlyRate"]
+                job["hourlyRate"] = _coerce_float(
+                    raw, f"Invalid numeric value for field 'hourlyRate' on task {task_id}: {raw!r}."
+                )
 
     gateways = data.get("gateways", [])
     if gateways is not None and not isinstance(gateways, list):
         raise InvalidProcessDefinitionError("'gateways' must be a list when present.")
+    gateways = gateways or []
 
-    for i, gw in enumerate(gateways or []):
+    gateway_ids: set = {gw["gateway_pk_id"] for gw in gateways if isinstance(gw, dict) and "gateway_pk_id" in gw}
+
+    for i, gw in enumerate(gateways):
         if not isinstance(gw, dict) or "gateway_pk_id" not in gw:
             raise InvalidProcessDefinitionError(f"gateways[{i}] is missing required field 'gateway_pk_id'.")
+        gw_id = gw["gateway_pk_id"]
+
+        after_task_id = gw.get("after_task_id")
+        if after_task_id is not None and after_task_id not in task_ids:
+            raise InvalidProcessDefinitionError(
+                f"Gateway {gw_id} has after_task_id {after_task_id!r} which does not exist in process_task."
+            )
+        after_gateway_id = gw.get("after_gateway_id")
+        if after_gateway_id is not None and after_gateway_id not in gateway_ids:
+            raise InvalidProcessDefinitionError(
+                f"Gateway {gw_id} has after_gateway_id {after_gateway_id!r} which does not exist in gateways."
+            )
+
+        prob_total = 0.0
+        for j, b in enumerate(gw.get("branches") or []):
+            target_task_id = b.get("target_task_id")
+            if target_task_id is not None and target_task_id not in task_ids:
+                raise InvalidProcessDefinitionError(
+                    f"Gateway {gw_id} branch[{j}] has target_task_id {target_task_id!r} "
+                    "which does not exist in process_task."
+                )
+            target_gateway_id = b.get("target_gateway_id")
+            if target_gateway_id is not None and target_gateway_id not in gateway_ids:
+                raise InvalidProcessDefinitionError(
+                    f"Gateway {gw_id} branch[{j}] has target_gateway_id {target_gateway_id!r} "
+                    "which does not exist in gateways."
+                )
+            if "probability" in b and b["probability"] is not None:
+                raw = b["probability"]
+                b["probability"] = _coerce_float(
+                    raw, f"Invalid numeric value for field 'probability' on gateway {gw_id} branch[{j}]: {raw!r}."
+                )
+            prob_total += b.get("probability") or 0.0
+
+        if gw.get("branches") and abs(prob_total - 1.0) > PROBABILITY_TOLERANCE:
+            raise InvalidProcessDefinitionError(
+                f"Gateway {gw_id} branch probabilities sum to {prob_total:.4f}, expected ~1.0 "
+                f"(tolerance ±{PROBABILITY_TOLERANCE})."
+            )
+
+
+def validate_graph_reachability(g: "nx.DiGraph") -> None:
+    """Ensure every task/gateway node can be reached from START and can reach END.
+
+    Run after ``build_graph``: an orphaned node is otherwise silently
+    ignored by cost/time computation and could strand the RL agent, so we
+    fail fast with a message naming the unreachable node instead.
+    """
+    reachable_from_start = nx.descendants(g, "START") | {"START"}
+    can_reach_end = nx.ancestors(g, "END") | {"END"}
+
+    for n, kind in g.nodes(data="kind"):
+        if kind not in ("task", "gateway"):
+            continue
+        if n not in reachable_from_start:
+            raise InvalidProcessDefinitionError(f"{kind} {n!r} is unreachable from START.")
+        if n not in can_reach_end:
+            raise InvalidProcessDefinitionError(f"{kind} {n!r} cannot reach END.")
 
 
 def build_graph(data: dict) -> nx.DiGraph:
@@ -100,6 +227,19 @@ def build_graph(data: dict) -> nx.DiGraph:
 
     for gw in gateways:
         gid = gw["gateway_pk_id"]
+        branches = []
+        for b in gw.get("branches", []):
+            if b.get("target_task_id") is not None:
+                target = b["target_task_id"]
+            elif b.get("target_gateway_id") is not None:
+                target = b["target_gateway_id"]
+            else:
+                target = "END"
+            branches.append({
+                "target": target,
+                "condition": b.get("condition"),
+                "probability": b.get("probability"),
+            })
         g.add_node(
             gid,
             kind="gateway",
@@ -107,6 +247,7 @@ def build_graph(data: dict) -> nx.DiGraph:
             name=gw.get("name"),
             after_task_id=gw.get("after_task_id"),
             after_gateway_id=gw.get("after_gateway_id"),
+            branches=branches,
         )
 
     g.add_node("START", kind="start")

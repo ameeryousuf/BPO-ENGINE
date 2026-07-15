@@ -26,6 +26,11 @@ def train(baseline_graph: nx.DiGraph, baseline_metrics: dict) -> Tuple[dict, Opt
     where ``best_sequence`` is the list of (heuristic_id, target) actions
     from the highest-total-reward episode.
     """
+    # A per-call Random instance (rather than the `random` module's shared
+    # global instance) keeps concurrent training runs fully independent -
+    # no cross-request interleaving of RNG state under concurrent load.
+    rng = random.Random()
+
     env = ProcessRedesignEnv(baseline_graph, baseline_metrics)
     Q = defaultdict(float)
     epsilon = EPSILON_START
@@ -45,13 +50,13 @@ def train(baseline_graph: nx.DiGraph, baseline_metrics: dict) -> Tuple[dict, Opt
             if not actions:
                 break
 
-            if random.random() < epsilon:
-                action = random.choice(actions)
+            if rng.random() < epsilon:
+                action = rng.choice(actions)
             else:
                 q_values = [Q[(state, a)] for a in actions]
                 max_q = max(q_values)
                 best_actions = [a for a, q in zip(actions, q_values) if q == max_q]
-                action = random.choice(best_actions)
+                action = rng.choice(best_actions)
 
             next_state, reward, done, info = env.step(action)
             episode_actions.append(action)

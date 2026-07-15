@@ -55,19 +55,36 @@ def compute_metrics(g: nx.DiGraph, start_node: str = "START", _memo: Optional[di
                     result = (own_time + succ_time, own_cost + succ_cost)
             elif kind == "gateway":
                 gtype = (g.nodes[node].get("gateway_type") or "").upper()
-                edges = list(g.out_edges(node, data=True))
-                if not edges:
+                branches = g.nodes[node].get("branches")
+                if gtype in PARALLEL_GATEWAYS or branches is None:
+                    edges = list(g.out_edges(node, data=True))
+                    if not edges:
+                        result = (0.0, 0.0)
+                    elif gtype in PARALLEL_GATEWAYS:
+                        branch_results = [walk(v) for (_, v, _) in edges]
+                        result = (max(r[0] for r in branch_results),
+                                  sum(r[1] for r in branch_results))
+                    else:
+                        total_p = sum((a.get("probability") or 0) for (_, _, a) in edges) or 1.0
+                        time_acc, cost_acc = 0.0, 0.0
+                        for (_, v, a) in edges:
+                            p = (a.get("probability") or 0) / total_p
+                            vt, vc = walk(v)
+                            time_acc += p * vt
+                            cost_acc += p * vc
+                        result = (time_acc, cost_acc)
+                elif not branches:
                     result = (0.0, 0.0)
-                elif gtype in PARALLEL_GATEWAYS:
-                    branch_results = [walk(v) for (_, v, _) in edges]
-                    result = (max(r[0] for r in branch_results),
-                              sum(r[1] for r in branch_results))
                 else:
-                    total_p = sum((a.get("probability") or 0) for (_, _, a) in edges) or 1.0
+                    # Use the gateway's explicit branch list (not raw graph
+                    # edges) so that two branches sharing the same target
+                    # node - e.g. both leading straight to END - are each
+                    # weighted correctly instead of collapsing into one edge.
+                    total_p = sum((b.get("probability") or 0) for b in branches) or 1.0
                     time_acc, cost_acc = 0.0, 0.0
-                    for (_, v, a) in edges:
-                        p = (a.get("probability") or 0) / total_p
-                        vt, vc = walk(v)
+                    for b in branches:
+                        p = (b.get("probability") or 0) / total_p
+                        vt, vc = walk(b["target"])
                         time_acc += p * vt
                         cost_acc += p * vc
                     result = (time_acc, cost_acc)

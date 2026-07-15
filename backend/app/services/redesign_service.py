@@ -9,7 +9,7 @@ files are read or written.
 import logging
 
 from app.core.metrics import compute_metrics
-from app.core.parser import build_graph, validate_process_definition
+from app.core.parser import build_graph, validate_graph_reachability, validate_process_definition
 from app.core.replay import replay_sequence, serialize_graph
 from app.core.trainer import train
 from app.exceptions import RedesignIntegrityError
@@ -38,6 +38,7 @@ def redesign(process_data: dict) -> dict:
     validate_process_definition(process_data)
 
     baseline_graph = build_graph(process_data)
+    validate_graph_reachability(baseline_graph)
     baseline_metrics = compute_metrics(baseline_graph)
 
     _, best_sequence, best_final_metrics, _ = train(baseline_graph, baseline_metrics)

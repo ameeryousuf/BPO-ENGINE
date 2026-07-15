@@ -59,4 +59,4 @@ def test_redesign_endpoint_rejects_invalid_json():
 def test_redesign_endpoint_rejects_invalid_process_definition():
     files = {"file": ("bad.json", json.dumps({"foo": "bar"}), "application/json")}
     response = client.post("/redesign", files=files)
-    assert response.status_code == 422
+    assert response.status_code == 400

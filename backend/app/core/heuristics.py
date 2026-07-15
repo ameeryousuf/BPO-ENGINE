@@ -36,6 +36,26 @@ def _sole_role(g: nx.DiGraph, n, role_letter: str):
     return matches[0] if len(matches) == 1 else None
 
 
+def _reroute_gateway_branches(g: nx.DiGraph, node, old_target, new_target) -> None:
+    """Update a gateway's explicit branch list when a heuristic changes what
+    ``node``'s edge to ``old_target`` points to.
+
+    ``node`` may have several branches sharing ``old_target`` (e.g. two
+    conditions both leading to END); every one of them is rerouted so that
+    a sibling branch unrelated to the change is never dropped. No-op for
+    non-gateway nodes or gateways with no explicit branch list (e.g. the
+    synthetic AND/PARALLEL split-join gateways created by ``parallelism_apply``).
+    """
+    if g.nodes[node].get("kind") != "gateway":
+        return
+    branches = g.nodes[node].get("branches")
+    if not branches:
+        return
+    for b in branches:
+        if b.get("target") == old_target:
+            b["target"] = new_target
+
+
 def _task_hourly_cost(g: nx.DiGraph, n) -> float:
     dur_h = _duration(g, n) / 60.0
     total = 0.0
@@ -80,6 +100,7 @@ def elimination_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     pred = list(g2.predecessors(n))[0]
     succ = list(g2.successors(n))[0]
     edge_attrs = g2.get_edge_data(pred, n) or {}
+    _reroute_gateway_branches(g2, pred, n, succ)
     g2.remove_node(n)
     g2.add_edge(pred, succ, **edge_attrs)
     return g2
@@ -135,6 +156,7 @@ def parallelism_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     split_id, join_id = f"AND_SPLIT_{n}_{m}", f"AND_JOIN_{n}_{m}"
     g2.add_node(split_id, kind="gateway", gateway_type="PARALLEL", name=f"Split before {n}/{m}")
     g2.add_node(join_id, kind="gateway", gateway_type="PARALLEL", name=f"Join after {n}/{m}")
+    _reroute_gateway_branches(g2, pred, n, split_id)
     g2.remove_edge(pred, n)
     g2.remove_edge(n, m)
     g2.remove_edge(m, succ)
@@ -166,6 +188,7 @@ def resequencing_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     succ = list(g2.successors(m))[0]
     pred_edge_attrs = g2.get_edge_data(pred, n) or {}
     succ_edge_attrs = g2.get_edge_data(m, succ) or {}
+    _reroute_gateway_branches(g2, pred, n, m)
     g2.remove_edge(pred, n)
     g2.remove_edge(n, m)
     g2.remove_edge(m, succ)
@@ -259,6 +282,9 @@ def knockout_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     pred_edge_attrs = g2.get_edge_data(pred, t1) or {}
     gw2_continue_attrs = g2.get_edge_data(gw2, succ) or {}
     gw1_continue_attrs = g2.get_edge_data(gw1, t2) or {}
+    _reroute_gateway_branches(g2, pred, t1, t2)
+    _reroute_gateway_branches(g2, gw2, succ, t1)
+    _reroute_gateway_branches(g2, gw1, t2, succ)
     g2.remove_edge(pred, t1)
     g2.remove_edge(gw2, succ)
     g2.remove_edge(gw1, t2)
