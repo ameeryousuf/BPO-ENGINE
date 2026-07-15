@@ -1,11 +1,8 @@
-import json
-from pathlib import Path
+"""Cycle time and cost computation over a process graph."""
+
+from typing import Optional
 
 import networkx as nx
-from app.parser import load_process, build_graph, summarize_graph
-
-BASE_DIR = Path(__file__).parent
-FILE_PATH = BASE_DIR / "data" / "asIsProcess.json"
 
 PROBABILISTIC_GATEWAYS = {"EXCLUSIVE", "INCLUSIVE"}
 PARALLEL_GATEWAYS = {"PARALLEL", "AND"}
@@ -30,7 +27,13 @@ def _task_cost(node_attrs: dict) -> float:
     return total
 
 
-def compute_metrics(g: nx.DiGraph, start_node="START", _memo=None):
+def compute_metrics(g: nx.DiGraph, start_node: str = "START", _memo: Optional[dict] = None) -> dict:
+    """Compute expected cycle time (minutes) and cost for a process graph.
+
+    Gateways are resolved probabilistically (exclusive/inclusive) or by
+    taking the longest/summed branch (parallel/AND), walking forward from
+    ``start_node`` to ``END``.
+    """
     if _memo is None:
         _memo = {}
 
@@ -78,15 +81,3 @@ def compute_metrics(g: nx.DiGraph, start_node="START", _memo=None):
 
     time_total, cost_total = walk(start_node)
     return {"cycle_time_minutes": round(time_total, 2), "cost": round(cost_total, 2)}
-
-
-if __name__ == "__main__":
-    data = load_process(FILE_PATH)
-    graph = build_graph(data)
-    metrics = compute_metrics(graph)
-    print(summarize_graph(graph))
-    print()
-    print("=== BASELINE METRICS (As-Is) ===")
-    print(f"Expected cycle time: {metrics['cycle_time_minutes']} minutes "
-          f"(~{round(metrics['cycle_time_minutes']/60, 1)} hours)")
-    print(f"Expected cost: {metrics['cost']:.2f} PKR")

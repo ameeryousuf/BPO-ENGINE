@@ -1,9 +1,17 @@
+"""Business process redesign heuristics.
+
+Each heuristic exposes a ``*_candidates`` generator that yields applicable
+targets for a given graph, and a ``*_apply`` function that returns a new
+graph with the heuristic applied. ``HEURISTICS`` is the registry consumed
+by the RL environment and trainer; ``all_candidates`` enumerates every
+applicable (heuristic_id, target) pair for a graph.
 """
-Stage 0 — Heuristic Rule Engine (complete: 10 Tier 1 heuristics)
-Each heuristic: candidates(g) -> valid targets, apply(g, target) -> new graph
-"""
+
+import copy
+from collections import Counter, defaultdict
+from typing import Iterator, Tuple
+
 import networkx as nx
-from collections import defaultdict, Counter
 
 AUTOMATION_TIME_CUT = 0.6
 COMPOSITION_MAX_COMBINED = 1200
@@ -13,22 +21,22 @@ INTERFACE_REWORK_CUT = 0.5
 OUTSOURCE_RATE_CUT = 0.25
 
 
-def _task_nodes(g):
+def _task_nodes(g: nx.DiGraph) -> list:
     return [n for n, k in g.nodes(data="kind") if k == "task"]
 
 
-def _duration(g, n):
+def _duration(g: nx.DiGraph, n) -> float:
     a = g.nodes[n]
     return (a.get("process_time") or 0) + (a.get("rework_time") or 0) + (a.get("waiting_time") or 0)
 
 
-def _sole_role(g, n, role_letter):
+def _sole_role(g: nx.DiGraph, n, role_letter: str):
     raci = g.nodes[n].get("raci") or []
     matches = [r for r in raci if r.get("role") == role_letter]
     return matches[0] if len(matches) == 1 else None
 
 
-def _task_hourly_cost(g, n):
+def _task_hourly_cost(g: nx.DiGraph, n) -> float:
     dur_h = _duration(g, n) / 60.0
     total = 0.0
     for r in g.nodes[n].get("raci") or []:
@@ -36,10 +44,7 @@ def _task_hourly_cost(g, n):
     return total
 
 
-# ============================================================
-# 1. Activity Automation
-# ============================================================
-def automation_candidates(g):
+def automation_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     tasks = _task_nodes(g)
     if not tasks:
         return
@@ -53,26 +58,25 @@ def automation_candidates(g):
         if _duration(g, n) < avg_duration:
             yield (n,)
 
-def automation_apply(g, target):
+
+def automation_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     (n,) = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     g2.nodes[n]["process_time"] = round(g2.nodes[n]["process_time"] * (1 - AUTOMATION_TIME_CUT), 2)
     g2.nodes[n]["automated"] = True
     return g2
 
 
-# ============================================================
-# 2. Activity Elimination
-# ============================================================
-def elimination_candidates(g):
+def elimination_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     for n in _task_nodes(g):
         if g.nodes[n].get("value_classification") == "NVA":
             if g.in_degree(n) == 1 and g.out_degree(n) == 1:
                 yield (n,)
 
-def elimination_apply(g, target):
+
+def elimination_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     (n,) = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     pred = list(g2.predecessors(n))[0]
     succ = list(g2.successors(n))[0]
     edge_attrs = g2.get_edge_data(pred, n) or {}
@@ -81,10 +85,7 @@ def elimination_apply(g, target):
     return g2
 
 
-# ============================================================
-# 3. Activity Composition
-# ============================================================
-def composition_candidates(g):
+def composition_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     for n in _task_nodes(g):
         succs = list(g.successors(n))
         if len(succs) != 1:
@@ -97,9 +98,10 @@ def composition_candidates(g):
             if _duration(g, n) + _duration(g, m) <= COMPOSITION_MAX_COMBINED:
                 yield (n, m)
 
-def composition_apply(g, target):
+
+def composition_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     n, m = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     for key in ("process_time", "rework_time", "waiting_time"):
         g2.nodes[n][key] = (g2.nodes[n].get(key) or 0) + (g2.nodes[m].get(key) or 0)
     g2.nodes[n]["task_name"] = f"{g2.nodes[n]['task_name']} + {g2.nodes[m]['task_name']}"
@@ -110,10 +112,7 @@ def composition_apply(g, target):
     return g2
 
 
-# ============================================================
-# 4. Parallelism
-# ============================================================
-def parallelism_candidates(g):
+def parallelism_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     for n in _task_nodes(g):
         succs = list(g.successors(n))
         if len(succs) != 1:
@@ -126,18 +125,20 @@ def parallelism_candidates(g):
             if g.in_degree(n) == 1 and g.out_degree(m) == 1:
                 yield (n, m)
 
-def parallelism_apply(g, target):
+
+def parallelism_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     n, m = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     pred = list(g2.predecessors(n))[0]
     succ = list(g2.successors(m))[0]
+    pred_edge_attrs = g2.get_edge_data(pred, n) or {}
     split_id, join_id = f"AND_SPLIT_{n}_{m}", f"AND_JOIN_{n}_{m}"
     g2.add_node(split_id, kind="gateway", gateway_type="PARALLEL", name=f"Split before {n}/{m}")
     g2.add_node(join_id, kind="gateway", gateway_type="PARALLEL", name=f"Join after {n}/{m}")
     g2.remove_edge(pred, n)
     g2.remove_edge(n, m)
     g2.remove_edge(m, succ)
-    g2.add_edge(pred, split_id)
+    g2.add_edge(pred, split_id, **pred_edge_attrs)
     g2.add_edge(split_id, n)
     g2.add_edge(split_id, m)
     g2.add_edge(n, join_id)
@@ -146,10 +147,7 @@ def parallelism_apply(g, target):
     return g2
 
 
-# ============================================================
-# 5. Resequencing
-# ============================================================
-def resequencing_candidates(g):
+def resequencing_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     for n in _task_nodes(g):
         succs = list(g.successors(n))
         if len(succs) != 1:
@@ -160,24 +158,24 @@ def resequencing_candidates(g):
         if _duration(g, m) < _duration(g, n):
             yield (n, m)
 
-def resequencing_apply(g, target):
+
+def resequencing_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     n, m = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     pred = list(g2.predecessors(n))[0]
     succ = list(g2.successors(m))[0]
+    pred_edge_attrs = g2.get_edge_data(pred, n) or {}
+    succ_edge_attrs = g2.get_edge_data(m, succ) or {}
     g2.remove_edge(pred, n)
     g2.remove_edge(n, m)
     g2.remove_edge(m, succ)
-    g2.add_edge(pred, m)
+    g2.add_edge(pred, m, **pred_edge_attrs)
     g2.add_edge(m, n)
-    g2.add_edge(n, succ)
+    g2.add_edge(n, succ, **succ_edge_attrs)
     return g2
 
 
-# ============================================================
-# 6. Extra Resources
-# ============================================================
-def extra_resources_candidates(g):
+def extra_resources_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     tasks = _task_nodes(g)
     if not tasks:
         return
@@ -185,9 +183,10 @@ def extra_resources_candidates(g):
     if not g.nodes[bottleneck].get("extra_resourced"):
         yield (bottleneck,)
 
-def extra_resources_apply(g, target):
+
+def extra_resources_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     (n,) = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     cost_before = _task_hourly_cost(g2, n)
     g2.nodes[n]["process_time"] = round(g2.nodes[n]["process_time"] * (1 - EXTRA_RESOURCE_TIME_CUT), 2)
     g2.nodes[n]["extra_cost"] = (g2.nodes[n].get("extra_cost") or 0) + cost_before * EXTRA_RESOURCE_COST_SURCHARGE
@@ -195,10 +194,7 @@ def extra_resources_apply(g, target):
     return g2
 
 
-# ============================================================
-# 7. Centralization
-# ============================================================
-def centralization_candidates(g):
+def centralization_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     groups = defaultdict(list)
     for n in _task_nodes(g):
         r = _sole_role(g, n, "R")
@@ -210,8 +206,9 @@ def centralization_candidates(g):
         if len(members) >= 2 and len(distinct_jobs) >= 2:
             yield tuple(n for n, _ in members)
 
-def centralization_apply(g, target):
-    g2 = g.copy()
+
+def centralization_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
+    g2 = copy.deepcopy(g)
     jobs = [(_sole_role(g2, n, "R") or {}).get("job_name") for n in target]
     winner = Counter(jobs).most_common(1)[0][0]
     winner_entry = None
@@ -229,10 +226,7 @@ def centralization_apply(g, target):
     return g2
 
 
-# ============================================================
-# 8. Knock-out (sequential checkpoint reordering)
-# ============================================================
-def _checkpoint_segments(g):
+def _checkpoint_segments(g: nx.DiGraph) -> list:
     segments = []
     for n, k in g.nodes(data="kind"):
         if k != "gateway":
@@ -245,32 +239,36 @@ def _checkpoint_segments(g):
             segments.append((preds[0], n))
     return segments
 
-def knockout_candidates(g):
+
+def knockout_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     segments = _checkpoint_segments(g)
     for i in range(len(segments) - 1):
         t1, gw1 = segments[i]
         t2, gw2 = segments[i + 1]
-        continue_target = next((v for _, v, a in g.out_edges(gw1, data=True) if v != "END"), None)
-        if continue_target == t2:
+        continue_target_1 = next((v for _, v, a in g.out_edges(gw1, data=True) if v != "END"), None)
+        continue_target_2 = next((v for _, v, a in g.out_edges(gw2, data=True) if v != "END"), None)
+        if continue_target_1 == t2 and continue_target_2 is not None:
             yield (t1, gw1, t2, gw2)
 
-def knockout_apply(g, target):
+
+def knockout_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     t1, gw1, t2, gw2 = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     pred = list(g2.predecessors(t1))[0]
     succ = next(v for _, v, a in g2.out_edges(gw2, data=True) if v != "END")
+    pred_edge_attrs = g2.get_edge_data(pred, t1) or {}
+    gw2_continue_attrs = g2.get_edge_data(gw2, succ) or {}
+    gw1_continue_attrs = g2.get_edge_data(gw1, t2) or {}
     g2.remove_edge(pred, t1)
     g2.remove_edge(gw2, succ)
-    g2.add_edge(pred, t2)
-    g2.add_edge(gw2, t1)
-    g2.add_edge(gw1, succ)
+    g2.remove_edge(gw1, t2)
+    g2.add_edge(pred, t2, **pred_edge_attrs)
+    g2.add_edge(gw2, t1, **gw2_continue_attrs)
+    g2.add_edge(gw1, succ, **gw1_continue_attrs)
     return g2
 
 
-# ============================================================
-# 9. Interfacing
-# ============================================================
-def interfacing_candidates(g):
+def interfacing_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     for n in _task_nodes(g):
         preds = [p for p in g.predecessors(n) if g.nodes[p].get("kind") == "task"]
         if not preds:
@@ -281,17 +279,15 @@ def interfacing_candidates(g):
             if (g.nodes[n].get("rework_time") or 0) > 0:
                 yield (n,)
 
-def interfacing_apply(g, target):
+
+def interfacing_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     (n,) = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     g2.nodes[n]["rework_time"] = round(g2.nodes[n]["rework_time"] * (1 - INTERFACE_REWORK_CUT), 2)
     return g2
 
 
-# ============================================================
-# 10. Outsourcing
-# ============================================================
-def outsourcing_candidates(g):
+def outsourcing_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     costs = {n: _task_hourly_cost(g, n) for n in _task_nodes(g)}
     if not costs:
         return
@@ -300,9 +296,10 @@ def outsourcing_candidates(g):
         if c > avg and not g.nodes[n].get("outsourced"):
             yield (n,)
 
-def outsourcing_apply(g, target):
+
+def outsourcing_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     (n,) = target
-    g2 = g.copy()
+    g2 = copy.deepcopy(g)
     for r in g2.nodes[n].get("raci") or []:
         if r.get("role") == "R":
             r["hourly_rate"] = round(float(r.get("hourly_rate") or 0) * (1 - OUTSOURCE_RATE_CUT), 2)
@@ -324,7 +321,8 @@ HEURISTICS = {
 }
 
 
-def all_candidates(g):
+def all_candidates(g: nx.DiGraph) -> list:
+    """Enumerate every applicable (heuristic_id, target) pair for a graph."""
     out = []
     for hid, (cand_fn, _) in HEURISTICS.items():
         for target in cand_fn(g):
