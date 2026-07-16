@@ -5,25 +5,36 @@ of scope for the current iteration of the redesign engine, so they aren't
 mistaken for oversights. See `backend/app/` for the implementation these
 notes refer to.
 
-## Cost calculation mixes currencies without conversion
+## ~~Cost calculation mixes currencies without conversion~~ (fixed)
 
 Every `jobTasks[].job` entry in the input JSON carries a `currencyType`
 (seen in the sample data as `PKR`, `USD`, `EUR`, and `GBP` on the same
-process — see `backend/app/data/asIsProcess.json`), but `currencyType` is
-never read anywhere in the codebase. `metrics._task_cost` and
-`heuristics._task_hourly_cost` both sum `hourly_rate * pct` across every
-RACI entry on a task as if `hourlyRate` were already in one common
-currency. In practice this means a process whose resources are billed in
-a mix of PKR/USD/EUR/GBP produces a `cost` figure that is a meaningless
-sum of raw numbers across currencies, not a true monetary total.
+process — see `backend/app/data/asIsProcess.json`). This used to be
+ignored, so `cost` was a meaningless sum of raw numbers across
+currencies rather than a true monetary total.
 
-This is pre-existing behavior, not something introduced or fixed in this
-pass. Fixing it properly requires a currency-conversion step (with rates
-sourced from somewhere — static config at minimum, a live rates feed for
-correctness over time) applied before costs are summed, plus a decision
-on what output currency to report. Flagging it here rather than fixing it
-silently, since picking a conversion source/rate is a product decision,
-not just an engineering one.
+Fixed: `backend/app/core/fx.py` fetches live USD-based exchange rates
+from open.er-api.com, caches them in memory for 24h (matching the API's
+own refresh cadence), and falls back to a hardcoded rate snapshot — with
+a logged warning — if the live fetch fails for any reason, so a
+`/redesign` request never fails just because the FX API is unreachable.
+`backend/app/core/parser.py` reads each job's `currencyType` and converts
+its `hourlyRate` to PKR via `fx.convert_to_pkr` once, at parse time
+(`build_graph`, called once per request), before the value ever reaches
+`metrics.py` or `heuristics.py` — both continue summing a single already-
+normalized number exactly as before, with no currency-awareness added
+downstream. The chosen output/base currency is PKR.
+
+One consequence worth noting: because currency-mixing previously
+distorted which tasks *looked* most expensive relative to each other,
+rate-sensitive heuristics (`outsourcing`, `extra_resources`,
+`centralization`) now target genuinely-expensive tasks instead of
+artifacts of unit confusion. On `asIsProcess.json` this held cycle-time
+improvement exactly constant (currency has nothing to do with time) but
+measurably changed the cost-improvement percentage the RL agent
+converges to (roughly 41% pre-fix vs roughly 28% post-fix) — the
+pre-fix percentage was optimizing against numbers that were never
+real money.
 
 ## No authentication or per-tenant isolation
 

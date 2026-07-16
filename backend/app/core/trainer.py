@@ -19,17 +19,24 @@ EPSILON_END = 0.05
 EPSILON_DECAY = 0.999
 
 
-def train(baseline_graph: nx.DiGraph, baseline_metrics: dict) -> Tuple[dict, Optional[list], Optional[dict], dict]:
+def train(
+    baseline_graph: nx.DiGraph, baseline_metrics: dict, seed: Optional[int] = None
+) -> Tuple[dict, Optional[list], Optional[dict], dict]:
     """Train a Q-learning agent over the redesign heuristic search space.
 
     Returns ``(Q, best_sequence, best_final_metrics, baseline_metrics)``
     where ``best_sequence`` is the list of (heuristic_id, target) actions
     from the highest-total-reward episode.
+
+    ``seed`` is optional and ``None`` by default (fully stochastic, as
+    before) - pass it for reproducible runs, e.g. from
+    ``app.core.quantitative_analysis.compare`` where a thesis-defense
+    report needs to be regenerable byte-for-byte.
     """
     # A per-call Random instance (rather than the `random` module's shared
     # global instance) keeps concurrent training runs fully independent -
     # no cross-request interleaving of RNG state under concurrent load.
-    rng = random.Random()
+    rng = random.Random(seed)
 
     env = ProcessRedesignEnv(baseline_graph, baseline_metrics)
     Q = defaultdict(float)

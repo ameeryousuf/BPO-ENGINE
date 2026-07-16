@@ -64,6 +64,22 @@ def _task_hourly_cost(g: nx.DiGraph, n) -> float:
     return total
 
 
+def _task_hourly_cost_raw(g: nx.DiGraph, n) -> float:
+    """Same as ``_task_hourly_cost`` but using each RACI entry's unconverted
+    ``raw_rate`` instead of the PKR-normalized ``hourly_rate``.
+
+    Kept in lockstep with ``_task_hourly_cost`` so that a redesigned graph's
+    raw (mixed-currency, uncorrected) cost total stays reconstructible
+    end-to-end - see ``extra_resources_apply``, the only heuristic that adds
+    a currency-denominated surcharge.
+    """
+    dur_h = _duration(g, n) / 60.0
+    total = 0.0
+    for r in g.nodes[n].get("raci") or []:
+        total += dur_h * float(r.get("raw_rate") or 0) * (float(r.get("pct") or 0) / 100.0)
+    return total
+
+
 def automation_candidates(g: nx.DiGraph) -> Iterator[tuple]:
     tasks = _task_nodes(g)
     if not tasks:
@@ -211,8 +227,12 @@ def extra_resources_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     (n,) = target
     g2 = copy.deepcopy(g)
     cost_before = _task_hourly_cost(g2, n)
+    cost_before_raw = _task_hourly_cost_raw(g2, n)
     g2.nodes[n]["process_time"] = round(g2.nodes[n]["process_time"] * (1 - EXTRA_RESOURCE_TIME_CUT), 2)
     g2.nodes[n]["extra_cost"] = (g2.nodes[n].get("extra_cost") or 0) + cost_before * EXTRA_RESOURCE_COST_SURCHARGE
+    g2.nodes[n]["extra_cost_raw"] = (
+        (g2.nodes[n].get("extra_cost_raw") or 0) + cost_before_raw * EXTRA_RESOURCE_COST_SURCHARGE
+    )
     g2.nodes[n]["extra_resourced"] = True
     return g2
 
@@ -329,6 +349,13 @@ def outsourcing_apply(g: nx.DiGraph, target: tuple) -> nx.DiGraph:
     for r in g2.nodes[n].get("raci") or []:
         if r.get("role") == "R":
             r["hourly_rate"] = round(float(r.get("hourly_rate") or 0) * (1 - OUTSOURCE_RATE_CUT), 2)
+            # Keep raw_rate (the unconverted, mixed-currency figure - see
+            # app.core.quantitative_analysis) in lockstep with hourly_rate,
+            # the same way extra_resources_apply tracks extra_cost_raw:
+            # otherwise the raw cost total silently stops matching what
+            # actually happened to this RACI entry's rate.
+            if r.get("raw_rate") is not None:
+                r["raw_rate"] = round(float(r.get("raw_rate") or 0) * (1 - OUTSOURCE_RATE_CUT), 2)
     g2.nodes[n]["outsourced"] = True
     return g2
 

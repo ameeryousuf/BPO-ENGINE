@@ -1,9 +1,3 @@
-"""HTTP layer for the redesign endpoint.
-
-Translates between HTTP concerns (file upload, status codes) and the
-domain-level ``redesign_service``, which knows nothing about FastAPI.
-"""
-
 import asyncio
 import json
 import logging
@@ -19,11 +13,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Hard ceiling on wall-clock time for a single redesign request. RL training
-# runs a fixed episode count but a much larger-than-expected process (bigger
-# state/action space per episode) could still blow past what's reasonable
-# for a synchronous HTTP request; this guarantees the client gets a prompt
-# error instead of a hung connection.
 TRAINING_TIMEOUT_SECONDS = 45
 
 

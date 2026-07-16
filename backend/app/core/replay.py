@@ -42,7 +42,10 @@ def _describe_step(hid: str, target: tuple, g: nx.DiGraph) -> str:
         return f"Resequenced '{names[m]}' ahead of '{names[n]}' since it is the shorter task."
     if hid == "extra_resources":
         (n,) = target
-        return f"Added extra resources to bottleneck task '{names[n]}', cutting its duration by {int(EXTRA_RESOURCE_TIME_CUT * 100)}%."
+        return (
+            f"Added extra resources to bottleneck task '{names[n]}', cutting its processing time "
+            f"by {int(EXTRA_RESOURCE_TIME_CUT * 100)}%."
+        )
     if hid == "centralization":
         return f"Centralized responsibility for {', '.join(names[n] for n in target)} under a single role."
     if hid == "knockout":
@@ -111,6 +114,10 @@ def _serialize_task(node_id, g: nx.DiGraph, task_lookup: dict, order_index: int)
         jt["time_allocation_percentage"] = str(raci_entry.get("pct"))
         jt["job"]["name"] = raci_entry.get("job_name")
         jt["job"]["hourlyRate"] = raci_entry.get("hourly_rate")
+        # raci hourly_rate is always PKR-normalized by build_graph (see
+        # app.core.fx), so the serialized job must say so too - otherwise
+        # resubmitting this output would double-convert the rate.
+        jt["job"]["currencyType"] = "PKR"
         job_tasks.append(jt)
     task["jobTasks"] = job_tasks
 

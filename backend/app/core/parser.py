@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import networkx as nx
 
+from app.core import fx
 from app.exceptions import InvalidProcessDefinitionError
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,47 @@ def validate_graph_reachability(g: "nx.DiGraph") -> None:
             raise InvalidProcessDefinitionError(f"{kind} {n!r} cannot reach END.")
 
 
+def _build_raci_entry(jt: dict, task_id) -> dict:
+    """Build one RACI entry, converting its job's hourly rate to PKR.
+
+    Every downstream consumer (metrics, heuristics) sums ``hourly_rate``
+    across RACI entries as if it were already one common currency, so the
+    conversion happens here, once, at parse time - nothing past this point
+    needs to know currencies exist.
+
+    ``raw_rate``/``currency`` (the unconverted hourly rate and its original
+    currency code) and the job's capacity fields (``job_id``,
+    ``hours_per_day``, ``days_per_week``, ``capacity_buffer``) are carried
+    alongside the normalized ``hourly_rate`` so that later analysis (see
+    ``app.core.quantitative_analysis``) can reconstruct both the legacy
+    mixed-currency total and per-resource capacity without re-reading the
+    original JSON.
+    """
+    job = jt.get("job") or {}
+    raw_rate = job.get("hourlyRate")
+    currency = job.get("currencyType") or "PKR"
+    hourly_rate = raw_rate
+    if raw_rate is not None:
+        try:
+            hourly_rate = fx.convert_to_pkr(float(raw_rate), currency)
+        except ValueError as exc:
+            raise InvalidProcessDefinitionError(
+                f"Task {task_id} job {job.get('name')!r}: {exc}"
+            ) from exc
+    return {
+        "role": jt.get("role"),
+        "pct": jt.get("time_allocation_percentage"),
+        "job_name": job.get("name"),
+        "hourly_rate": hourly_rate,
+        "raw_rate": raw_rate,
+        "currency": currency,
+        "job_id": job.get("job_id"),
+        "hours_per_day": job.get("hours_per_day"),
+        "days_per_week": job.get("days_per_week"),
+        "capacity_buffer": job.get("capacity_buffer"),
+    }
+
+
 def build_graph(data: dict) -> nx.DiGraph:
     """Build a directed graph of tasks and gateways from a process definition.
 
@@ -190,6 +232,11 @@ def build_graph(data: dict) -> nx.DiGraph:
     ``condition``/``probability`` attributes when they originate from a
     gateway branch. Callers should run ``validate_process_definition``
     first to get a clear error instead of a ``KeyError``.
+
+    Each RACI entry's ``hourly_rate`` is converted to PKR here (see
+    ``_build_raci_entry``) based on its job's ``currencyType``, so this is
+    the one point per request where live FX rates are fetched (and
+    cached) - not something that happens per training episode.
     """
     g = nx.DiGraph()
     g.graph["process_id"] = data.get("process_id")
@@ -202,15 +249,7 @@ def build_graph(data: dict) -> nx.DiGraph:
         t = pt.get("task", {}) or {}
         task_id = pt["task_id"]
         jts = t.get("jobTasks") or []
-        raci = [
-            {
-                "role": jt.get("role"),
-                "pct": jt.get("time_allocation_percentage"),
-                "job_name": (jt.get("job") or {}).get("name"),
-                "hourly_rate": (jt.get("job") or {}).get("hourlyRate"),
-            }
-            for jt in jts
-        ]
+        raci = [_build_raci_entry(jt, task_id) for jt in jts]
         g.add_node(
             task_id,
             kind="task",
@@ -222,6 +261,10 @@ def build_graph(data: dict) -> nx.DiGraph:
             rework_time=t.get("expected_rework_time") or 0,
             waiting_time=t.get("expected_waiting_time") or 0,
             extra_cost=0.0,
+            extra_cost_raw=0.0,
+            frequency_interval=t.get("frequency_interval"),
+            frequency_period=t.get("frequency_period"),
+            occurrences=t.get("occurrences"),
             raci=raci,
         )
 
