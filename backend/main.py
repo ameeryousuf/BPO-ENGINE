@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from validation import validate_process
 from analysis import analyze_process
 from critical_path import find_critical_paths
-from redesign import redesign_process
+from redesign import redesign_process, _build_raci
 
 BASE_DIR = Path(__file__).parent
 PROCESS_DIR = BASE_DIR / "processes"
@@ -71,7 +71,11 @@ def analyze(process_id: str, goal: str = "both", episodes: int = 300, redesign: 
         "critical_paths": critical_paths,
         "as_is_bpmn_xml": process["bpmn_xml"],
         "tasks": [
-            {"task_id": pt["task_id"], "task_name": pt["task"].get("task_name", "")}
+            {
+                "task_id": pt["task_id"],
+                "task_name": pt["task"].get("task_name", ""),
+                "raci": _build_raci(pt["task"]),
+            }
             for pt in process.get("process_task", [])
         ],
     }

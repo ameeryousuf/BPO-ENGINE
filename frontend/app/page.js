@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { fetchProcess } from "@/lib/api";
+import { Fragment, useState } from "react";
 
 const BpmnViewer = dynamic(() => import("../components/BpmnViewer"), { ssr: false });
 
@@ -184,7 +184,7 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={loading}
-                className="bg-[#12151C] text-white px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
+                className="bg-[#12151C] hover:cursor-pointer text-white px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
               >
                 {loading ? "Analyzing…" : "Run"}
               </button>
@@ -465,12 +465,16 @@ function CriticalPaths({ paths }) {
 }
 
 function TaskReference({ asIsTasks, toBeTasks }) {
+  const [expandedId, setExpandedId] = useState(null);
+
   if (!asIsTasks?.length) return null;
 
   const toBeIds = new Set((toBeTasks || []).map((t) => String(t.task_id)));
   const asIsIds = new Set(asIsTasks.map((t) => String(t.task_id)));
   const allIds = Array.from(new Set([...asIsIds, ...toBeIds])).sort((a, b) => Number(a) - Number(b));
-  const byId = buildTaskNameMap(asIsTasks, toBeTasks);
+  const byId = {};
+  (asIsTasks || []).forEach((t) => { byId[String(t.task_id)] = t; });
+  (toBeTasks || []).forEach((t) => { byId[String(t.task_id)] = t; });
 
   return (
     <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(18,21,28,0.06)] border border-black/5 overflow-hidden">
@@ -480,35 +484,96 @@ function TaskReference({ asIsTasks, toBeTasks }) {
             <tr className="border-b border-black/5 bg-[#12151C]/[0.02]">
               <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task ID</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task Name</th>
-              <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Present In</th>
+              <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Present In</th>
+              <th className="text-right px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">RACI</th>
             </tr>
           </thead>
           <tbody>
-            {allIds.map((id, i) => (
-              <tr
-                key={id}
-                className={`border-b border-black/5 last:border-0 ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""}`}
-              >
-                <td className="px-6 py-3 font-mono text-xs">{id}</td>
-                <td className="px-4 py-3">{byId[id]}</td>
-                <td className="px-6 py-3 text-xs">
-                  {asIsIds.has(id) && (
-                    <span className="inline-flex items-center gap-1 mr-3 text-[#1565C0]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#1565C0]" /> As-Is
-                    </span>
+            {allIds.map((id, i) => {
+              const task = byId[id];
+              const isOpen = expandedId === id;
+              return (
+                <Fragment key={id}>
+                  <tr
+                    onClick={() => setExpandedId(isOpen ? null : id)}
+                    className={`border-b border-black/5 last:border-0 cursor-pointer hover:bg-[#1565C0]/[0.04] transition-colors ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
+                      }`}
+                  >
+                    <td className="px-6 py-3 font-mono text-xs">{id}</td>
+                    <td className="px-4 py-3">{task.task_name}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {asIsIds.has(id) && (
+                        <span className="inline-flex items-center gap-1 mr-3 text-[#1565C0]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#1565C0]" /> As-Is
+                        </span>
+                      )}
+                      {toBeIds.has(id) && (
+                        <span className="inline-flex items-center gap-1 text-[#B45309]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#B45309]" /> To-Be
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-3 text-right text-xs text-[#12151C]/45">
+                      {isOpen ? "Hide ▲" : "Show ▼"}
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-4 bg-[#12151C]/[0.015]">
+                        <RaciTable raci={task.raci} />
+                      </td>
+                    </tr>
                   )}
-                  {toBeIds.has(id) && (
-                    <span className="inline-flex items-center gap-1 text-[#B45309]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#B45309]" /> To-Be
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function RaciTable({ raci }) {
+  if (!raci || raci.length === 0) {
+    return <p className="text-xs text-[#12151C]/45">No RACI data for this task.</p>;
+  }
+
+  const roleLabel = { R: "Responsible", A: "Accountable", C: "Consulted", I: "Informed" };
+  const roleColor = { R: "#2E7D32", A: "#B45309", C: "#1565C0", I: "#12151C55" };
+
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-[#12151C]/45">
+          <th className="text-left pb-2 font-medium">Role</th>
+          <th className="text-left pb-2 font-medium">Job</th>
+          <th className="text-right pb-2 font-medium">Hourly Rate</th>
+          <th className="text-right pb-2 font-medium">Time Allocation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {raci.map((r, i) => (
+          <tr key={i} className="border-t border-black/5">
+            <td className="py-2">
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
+                style={{ backgroundColor: `${roleColor[r.role]}1A`, color: roleColor[r.role] }}
+              >
+                {r.role} · {roleLabel[r.role] || r.role}
+              </span>
+            </td>
+            <td className="py-2">{r.job_name}</td>
+            <td className="py-2 text-right font-mono">
+              {r.hourly_rate != null ? `${r.hourly_rate} ${r.currency}` : "—"}
+            </td>
+            <td className="py-2 text-right font-mono">
+              {r.time_allocation_percentage != null ? `${r.time_allocation_percentage}%` : "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -543,8 +608,8 @@ function RedesignTraceTable({ trace, taskNames, onSelectHeuristic }) {
                 <td className="px-4 py-4">
                   <span
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${entry.implemented
-                        ? "bg-[#2E7D32]/10 text-[#2E7D32]"
-                        : "bg-[#12151C]/6 text-[#12151C]/45"
+                      ? "bg-[#2E7D32]/10 text-[#2E7D32]"
+                      : "bg-[#12151C]/6 text-[#12151C]/45"
                       }`}
                   >
                     <span

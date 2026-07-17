@@ -11,12 +11,30 @@ from q_learning import train_q_table
 
 MAX_STEPS = 8
 
+def _build_raci(task):
+    raci = []
+    for jt in task.get("jobTasks") or []:
+        job = jt.get("job") or {}
+        raci.append({
+            "role": jt.get("role"),
+            "job_name": job.get("name", "Unknown"),
+            "hourly_rate": job.get("hourlyRate"),
+            "currency": job.get("currencyType", "PKR"),
+            "time_allocation_percentage": jt.get("time_allocation_percentage"),
+        })
+    return raci
+
+
 
 def _metrics_dict(process_json):
     analysis = analyze_process(process_json)
     critical_paths = find_critical_paths(process_json)
     tasks = [
-        {"task_id": pt["task_id"], "task_name": pt["task"].get("task_name", "")}
+        {
+            "task_id": pt["task_id"],
+            "task_name": pt["task"].get("task_name", ""),
+            "raci": _build_raci(pt["task"]),
+        }
         for pt in process_json.get("process_task", [])
     ]
     return {
