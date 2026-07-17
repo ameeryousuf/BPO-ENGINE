@@ -3,6 +3,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from validation import validate_process
 from analysis import analyze_process
@@ -13,6 +14,14 @@ BASE_DIR = Path(__file__).parent
 PROCESS_DIR = BASE_DIR / "processes"
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def load_process(process_id: str) -> dict:
