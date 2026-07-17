@@ -174,6 +174,42 @@ def _resolve_loops(graph, tasks_by_activity, gateway_by_name, metric, memo):
         memo[header] = body_value / (1 - r) + exit_value
 
 
+def _find_join(graph, split_node):
+    branch_starts = graph.successors(split_node)
+    reachable_sets = []
+    for start in branch_starts:
+        seen = set()
+        stack = [start]
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            for tgt in graph.successors(node):
+                stack.append(tgt)
+        reachable_sets.append(seen)
+
+    common = set.intersection(*reachable_sets) if reachable_sets else set()
+    if not common:
+        return None
+
+    seen = set()
+    order = []
+    stack = [branch_starts[0]]
+    while stack:
+        node = stack.pop(0)
+        if node in seen:
+            continue
+        seen.add(node)
+        if node in common:
+            order.append(node)
+        for tgt in graph.successors(node):
+            if tgt not in seen:
+                stack.append(tgt)
+
+    return order[0] if order else None
+
+
 def _compute(start_node, graph, tasks_by_activity, gateway_by_name, metric, stop=None, memo=None):
     if memo is None:
         memo = {}
@@ -219,19 +255,29 @@ def _path_value(node_id, graph, tasks_by_activity, gateway_by_name, metric, memo
         if gateway is None:
             raise ValueError(f"gateway '{name}' has multiple outgoing flows but no matching entry in gateways[]")
 
-        branch_values = []
-        for flow in graph.outgoing[node_id]:
-            target = flow.get("targetRef")
-            probability = _find_probability(gateway, flow, graph)
-            value = _path_value(target, graph, tasks_by_activity, gateway_by_name, metric, memo, stop)
-            branch_values.append((probability, value))
-
         if gateway.get("gateway_type") == "PARALLEL":
+            join = _find_join(graph, node_id)
+            fragment_values = [
+                _compute(flow.get("targetRef"), graph, tasks_by_activity, gateway_by_name, metric, stop=join)
+                for flow in graph.outgoing[node_id]
+            ]
             if metric in (Metric.CYCLE_TIME, Metric.THEORETICAL):
-                result = max(v for _, v in branch_values)
+                fragment_result = max(fragment_values)
             else:
-                result = sum(v for _, v in branch_values)
+                fragment_result = sum(fragment_values)
+            if join is not None and join != stop:
+                downstream = _compute(join, graph, tasks_by_activity, gateway_by_name, metric, stop=stop)
+            else:
+                downstream = 0.0
+            result = fragment_result + downstream
         else:
+            branch_values = []
+            for flow in graph.outgoing[node_id]:
+                target = flow.get("targetRef")
+                probability = _find_probability(gateway, flow, graph)
+                value = _path_value(target, graph, tasks_by_activity, gateway_by_name, metric, memo, stop)
+                branch_values.append((probability, value))
+
             total_probability = sum(p for p, _ in branch_values)
             if abs(total_probability - 1.0) > 0.001:
                 raise ValueError(f"gateway '{name}' branch probabilities sum to {total_probability}, expected 1.0")
