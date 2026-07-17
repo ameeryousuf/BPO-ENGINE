@@ -69,6 +69,7 @@ def analyze(process_id: str, goal: str = "both", episodes: int = 300, redesign: 
             "cost_unit": analysis_result.cost_unit,
         },
         "critical_paths": critical_paths,
+        "as_is_bpmn_xml": process["bpmn_xml"],
     }
 
     if not redesign:

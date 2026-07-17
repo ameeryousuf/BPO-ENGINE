@@ -181,8 +181,14 @@ export default function Home() {
               </Section>
             )}
 
+            {data.as_is_bpmn_xml && (
+              <Section title="As-Is BPMN Diagram" accent="#1565C0">
+                <BpmnViewer xml={data.as_is_bpmn_xml} />
+              </Section>
+            )}
+
             {data.final_bpmn_xml && (
-              <Section title="To-Be Diagram" accent="#B45309">
+              <Section title="To-Be BPMN Diagram" accent="#B45309">
                 <BpmnViewer xml={data.final_bpmn_xml} />
               </Section>
             )}
