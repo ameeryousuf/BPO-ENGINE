@@ -1,7 +1,8 @@
 "use client";
-
-import { useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
 import { fetchProcess } from "@/lib/api";
+const BpmnViewer = dynamic(() => import("../components/BpmnViewer"), { ssr: false });
 
 export default function Home() {
   const [processId, setProcessId] = useState("");
@@ -11,6 +12,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
+
+  useEffect(() => {
+    if (data) {
+      console.log(data.final_bpmn_xml)
+    }
+  }, [data])
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -91,7 +98,7 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="bg-[#1565C0] text-white px-5 py-2 rounded-md font-medium hover:bg-[#0F4C9C] transition disabled:opacity-50"
+              className="bg-[#1565C0] text-white hover:shadow-ms shadow-blue-400 hover:cursor-pointer px-5 py-2 rounded-md font-medium hover:bg-[#0F4C9C] transition disabled:opacity-50"
             >
               {loading ? "Analyzing…" : "Run"}
             </button>
@@ -171,6 +178,12 @@ export default function Home() {
             {data.redesign_trace && (
               <Section title="Redesign Trace" accent="#B45309">
                 <RedesignTrace trace={data.redesign_trace} />
+              </Section>
+            )}
+
+            {data.final_bpmn_xml && (
+              <Section title="To-Be Diagram" accent="#B45309">
+                <BpmnViewer xml={data.final_bpmn_xml} />
               </Section>
             )}
           </div>

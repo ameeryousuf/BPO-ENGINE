@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
 
-from bpmn_graph import elem_name, parse_bpmn_graph
+from bpmn_graph import TASK_TAGS, elem_name, parse_bpmn_graph
 
 
 @dataclass
@@ -126,7 +126,7 @@ def build_working_process(process_data: dict) -> WorkingProcess:
     incoming = {}
 
     for node_id, tag in graph.node_tags.items():
-        node_tags[node_id] = tag
+        node_tags[node_id] = "task" if tag in TASK_TAGS else tag
         node_names[node_id] = elem_name(graph.nodes[node_id])
         outgoing[node_id] = []
         incoming[node_id] = []
