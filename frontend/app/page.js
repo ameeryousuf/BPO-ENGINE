@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
 import { motion } from "framer-motion";
+import { useFormik } from "formik";
+import * as Yup from "yup";
 import { fetchProcess } from "@/lib/api";
 
 const BpmnViewer = dynamic(() => import("../components/BpmnViewer"), { ssr: false });
@@ -12,37 +13,60 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
 };
 
+const validationSchema = Yup.object({
+  processId: Yup.string()
+    .trim()
+    .required("Please enter a process ID")
+    .matches(/^[0-9]+$/, "Process ID must contain digits only")
+    .max(10, "Process ID can be at most 10 digits"),
+  goal: Yup.string().oneOf(["both", "time", "cost"]).required(),
+  episodes: Yup.number()
+    .typeError("Episodes must be a number")
+    .integer("Episodes must be a whole number")
+    .min(1, "Episodes must be at least 1"),
+  includeRedesign: Yup.boolean(),
+});
+
 export default function Home() {
-  const [processId, setProcessId] = useState("");
-  const [goal, setGoal] = useState("both");
-  const [episodes, setEpisodes] = useState(300);
-  const [includeRedesign, setIncludeRedesign] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [data, setData] = useState(null);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!processId.trim()) return;
-
-    setLoading(true);
-    setError(null);
-    setData(null);
-
-    try {
-      const result = await fetchProcess(processId.trim(), goal, episodes, includeRedesign);
-      if (!result.success) {
-        setError(result.message || "Validation failed.");
-        setData(result);
-      } else {
-        setData(result);
+  const formik = useFormik({
+    initialValues: {
+      processId: "",
+      goal: "both",
+      episodes: 300,
+      includeRedesign: true,
+    },
+    validationSchema,
+    validateOnBlur: true,
+    validateOnChange: true,
+    onSubmit: async (values, { setSubmitting, setStatus }) => {
+      setStatus(null);
+      formik.setFieldValue("data", null, false);
+      try {
+        const result = await fetchProcess(
+          values.processId.trim(),
+          values.goal,
+          values.episodes,
+          values.includeRedesign
+        );
+        if (!result.success) {
+          setStatus({ error: result.message || "Validation failed.", data: result });
+        } else {
+          setStatus({ error: null, data: result });
+        }
+      } catch (err) {
+        setStatus({
+          error: err instanceof Error ? err.message : "Something went wrong reaching the backend.",
+          data: null,
+        });
+      } finally {
+        setSubmitting(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong reaching the backend.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+  });
+
+  const { values, errors, touched, handleChange, handleBlur, handleSubmit, isSubmitting, status } = formik;
+  const error = status?.error;
+  const data = status?.data;
 
   return (
     <main className="min-h-screen bg-[#FAFAF9] text-[#12151C]" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -66,6 +90,7 @@ export default function Home() {
 
           <motion.form
             onSubmit={handleSubmit}
+            noValidate
             initial="hidden"
             animate="visible"
             variants={fadeUp}
@@ -78,12 +103,21 @@ export default function Home() {
                 </label>
                 <input
                   type="text"
-                  value={processId}
-                  onChange={(e) => setProcessId(e.target.value)}
+                  name="processId"
+                  inputMode="numeric"
+                  value={values.processId}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder="1972"
-                  className="w-full rounded-xl border border-black/10 bg-[#FAFAF9] px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30 focus:border-[#1565C0] transition-all"
+                  className={`w-full rounded-xl border bg-[#FAFAF9] px-4 py-3 text-lg focus:outline-none focus:ring-2 transition-all ${touched.processId && errors.processId
+                      ? "border-red-300 focus:ring-red-200 focus:border-red-400"
+                      : "border-black/10 focus:ring-[#1565C0]/30 focus:border-[#1565C0]"
+                    }`}
                   style={{ fontFamily: "'IBM Plex Mono', monospace" }}
                 />
+                {touched.processId && errors.processId && (
+                  <p className="text-xs text-red-600 mt-1.5">{errors.processId}</p>
+                )}
               </div>
 
               <div>
@@ -91,8 +125,10 @@ export default function Home() {
                   Goal
                 </label>
                 <select
-                  value={goal}
-                  onChange={(e) => setGoal(e.target.value)}
+                  name="goal"
+                  value={values.goal}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   className="rounded-xl border border-black/10 bg-[#FAFAF9] px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30 focus:border-[#1565C0] transition-all"
                 >
                   <option value="both">Time + Cost</option>
@@ -103,10 +139,10 @@ export default function Home() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={isSubmitting}
                 className="bg-[#12151C] text-white hover:cursor-pointer px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
               >
-                {loading ? "Analyzing…" : "Run"}
+                {isSubmitting ? "Analyzing…" : "Run"}
               </button>
             </div>
 
@@ -114,23 +150,32 @@ export default function Home() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={includeRedesign}
-                  onChange={(e) => setIncludeRedesign(e.target.checked)}
+                  name="includeRedesign"
+                  checked={values.includeRedesign}
+                  onChange={handleChange}
                   className="accent-[#1565C0]"
                 />
                 Include redesign
               </label>
-              {includeRedesign && (
+              {values.includeRedesign && (
                 <label className="flex items-center gap-2">
                   Episodes
                   <input
                     type="number"
-                    value={episodes}
-                    onChange={(e) => setEpisodes(Number(e.target.value))}
-                    className="w-20 rounded-lg border border-black/10 bg-[#FAFAF9] px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30"
+                    name="episodes"
+                    value={values.episodes}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    className={`w-20 rounded-lg border bg-[#FAFAF9] px-2 py-1.5 focus:outline-none focus:ring-2 ${touched.episodes && errors.episodes
+                        ? "border-red-300 focus:ring-red-200"
+                        : "border-black/10 focus:ring-[#1565C0]/30"
+                      }`}
                     style={{ fontFamily: "'IBM Plex Mono', monospace" }}
                   />
                 </label>
+              )}
+              {touched.episodes && errors.episodes && (
+                <p className="text-xs text-red-600">{errors.episodes}</p>
               )}
             </div>
           </motion.form>
