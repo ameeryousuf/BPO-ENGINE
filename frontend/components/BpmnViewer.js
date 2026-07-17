@@ -57,25 +57,25 @@ export default function BpmnViewer({ xml }) {
 
     return (
         <div className="relative">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-3 mb-3">
                 <button
                     type="button"
                     onClick={zoomOut}
-                    className="px-2 py-1 text-sm border border-[#1A2B4C]/20 rounded hover:bg-[#1A2B4C]/5"
+                    className="w-7 h-7 flex items-center justify-center text-sm border border-[#12151C]/15 rounded-full hover:bg-[#12151C]/5 transition-colors"
                 >
                     −
                 </button>
                 <button
                     type="button"
                     onClick={zoomIn}
-                    className="px-2 py-1 text-sm border border-[#1A2B4C]/20 rounded hover:bg-[#1A2B4C]/5"
+                    className="w-7 h-7 flex items-center justify-center text-sm border border-[#12151C]/15 rounded-full hover:bg-[#12151C]/5 transition-colors"
                 >
                     +
                 </button>
                 <button
                     type="button"
                     onClick={fitToScreen}
-                    className="px-2 py-1 text-sm border border-[#1A2B4C]/20 rounded hover:bg-[#1A2B4C]/5"
+                    className="text-xs text-[#12151C]/55 hover:text-[#12151C] transition-colors ml-1"
                 >
                     Fit to screen
                 </button>
@@ -83,7 +83,7 @@ export default function BpmnViewer({ xml }) {
             <div
                 ref={containerRef}
                 style={{ height: "500px", width: "100%" }}
-                className="border border-[#1A2B4C]/10 rounded-md bg-white"
+                className="border border-[#12151C]/8 rounded-md bg-white"
             />
             {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
         </div>
