@@ -15,6 +15,10 @@ MAX_STEPS = 8
 def _metrics_dict(process_json):
     analysis = analyze_process(process_json)
     critical_paths = find_critical_paths(process_json)
+    tasks = [
+        {"task_id": pt["task_id"], "task_name": pt["task"].get("task_name", "")}
+        for pt in process_json.get("process_task", [])
+    ]
     return {
         "cycle_time": analysis.cycle_time,
         "theoretical_cycle_time": analysis.theoretical_cycle_time,
@@ -24,6 +28,7 @@ def _metrics_dict(process_json):
         "time_unit": analysis.time_unit,
         "cost_unit": analysis.cost_unit,
         "critical_paths": critical_paths,
+        "tasks": tasks,
     }, analysis
 
 

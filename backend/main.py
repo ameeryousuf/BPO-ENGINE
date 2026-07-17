@@ -70,6 +70,10 @@ def analyze(process_id: str, goal: str = "both", episodes: int = 300, redesign: 
         },
         "critical_paths": critical_paths,
         "as_is_bpmn_xml": process["bpmn_xml"],
+        "tasks": [
+            {"task_id": pt["task_id"], "task_name": pt["task"].get("task_name", "")}
+            for pt in process.get("process_task", [])
+        ],
     }
 
     if not redesign:

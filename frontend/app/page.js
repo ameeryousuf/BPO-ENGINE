@@ -1,9 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { motion } from "framer-motion";
-import { useFormik } from "formik";
-import * as Yup from "yup";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { fetchProcess } from "@/lib/api";
 
 const BpmnViewer = dynamic(() => import("../components/BpmnViewer"), { ssr: false });
@@ -13,60 +12,117 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
 };
 
-const validationSchema = Yup.object({
-  processId: Yup.string()
-    .trim()
-    .required("Please enter a process ID")
-    .matches(/^[0-9]+$/, "Process ID must contain digits only")
-    .max(10, "Process ID can be at most 10 digits"),
-  goal: Yup.string().oneOf(["both", "time", "cost"]).required(),
-  episodes: Yup.number()
-    .typeError("Episodes must be a number")
-    .integer("Episodes must be a whole number")
-    .min(1, "Episodes must be at least 1"),
-  includeRedesign: Yup.boolean(),
-});
+const HEURISTIC_DEFINITIONS = {
+  "Parallelism": {
+    accent: "#1565C0",
+    targets: "TIME",
+    definition:
+      "Run two steps at the same time instead of one after another. Many steps are only done in sequence out of habit or convention, not because one truly depends on the other finishing first.",
+    rule:
+      "Looks for two neighboring steps where the first leads directly into the second, with nothing else branching in between. Picks the pair that saves the most time by running together, then redraws the process so both steps start at the same moment and the flow only continues once both are finished.",
+    effect: "Cuts cycle time. Cost stays the same — the same work still happens, just not one at a time.",
+  },
+  "Activity Automation": {
+    accent: "#B45309",
+    targets: "TIME + COST",
+    definition:
+      "Use technology to do a task faster and more cheaply than a person doing it by hand. Automated steps are quicker, more consistent, and usually cost less per run.",
+    rule:
+      "Any step that still takes measurable time is a candidate. The system picks whichever qualifying step currently takes the longest, then cuts its working time in half and its waiting time in half too.",
+    effect: "Cuts both time and cost, since labor cost is tied to how long a person spends on the step.",
+    note: "The 50% reduction is a planning assumption, not a measured figure — real automation savings vary by task.",
+  },
+  "Activity Elimination": {
+    accent: "#2E7D32",
+    targets: "TIME + COST",
+    definition:
+      "Remove a step entirely if it doesn't add real value. Steps that exist only as a leftover habit, or to double-check something nobody is actually accountable for, can often be dropped.",
+    rule:
+      "A step qualifies if no one is clearly marked as doing the work or answering for the outcome. Among qualifying steps, the system removes the one that currently takes the most time, and reconnects the flow around it.",
+    effect: "Removes all the time and cost tied to that step.",
+    note: "This is a simplifying proxy for \u201cadds no value\u201d — real value judgments are often more nuanced than ownership alone.",
+  },
+  "Activity Composition": {
+    accent: "#1565C0",
+    targets: "TIME",
+    definition:
+      "Combine two small steps into one. When the same person handles both, merging them saves the hand-off and setup time that happens every time work switches from one step to the next.",
+    rule:
+      "Two neighboring steps qualify if the same person is mainly responsible for both. The system merges the pair with the largest estimated setup-time saving into a single new step, combining their time and everyone involved.",
+    effect: "A modest cut to cycle time from avoiding the repeated hand-off. Cost is largely unchanged — it's the same total work, just done in one motion.",
+  },
+  "Case-Based Work": {
+    accent: "#B45309",
+    targets: "TIME",
+    definition:
+      "Stop letting individual cases sit and wait for a scheduled batch run. Some steps only happen on a fixed weekly or monthly cycle, even though the actual work doesn't need to wait that long.",
+    rule:
+      "A step qualifies if it has real waiting time and runs on a weekly or monthly schedule. The system picks whichever qualifying step has the most waiting time built up, and cuts it down to a fifth of what it was.",
+    effect: "A significant cut to cycle time. Cost is unaffected, since waiting time isn't billed labor in this model.",
+  },
+  "Empower": {
+    accent: "#2E7D32",
+    targets: "TIME + COST",
+    definition:
+      "Let the people doing the work make the decision, instead of pausing every time for a manager's sign-off. Removing an unnecessary approval step means less waiting and less overhead.",
+    rule:
+      "A step qualifies if someone is currently listed as the approver. The system picks the step where that approver is the most expensive person to keep in the loop, removes the approval role, and reduces waiting time by a fifth.",
+    effect: "Cuts both time (less waiting for sign-off) and cost (fewer people billing time to the step).",
+  },
+  "Numerical Involvement": {
+    accent: "#1565C0",
+    targets: "TIME",
+    definition:
+      "Fewer people, fewer hand-offs. When a step loops in more people than it needs — often just to keep them informed — the coordination itself adds delay.",
+    rule:
+      "A step qualifies if more than two people are attached to it. The system picks the step with the most people involved, removes everyone who is only being kept informed, and trims waiting time slightly for each person removed.",
+    effect: "A modest cut to cycle time. Cost stays roughly the same, since informed-only roles typically weren't driving the cost.",
+  },
+  "Trusted Party": {
+    accent: "#B45309",
+    targets: "TIME + COST",
+    definition:
+      "Accept a result someone else already produced instead of redoing the same check yourself. If a trusted outside organization already verified something, re-verifying it from scratch usually just adds delay and cost.",
+    rule:
+      "A step qualifies if it involves an unusually long wait — a day or more. The system picks whichever qualifying step has the longest wait, cuts its waiting time down to a tenth, and reduces its own working time too.",
+    effect: "A large cut to cycle time, plus a meaningful cut to cost from the reduced verification work.",
+  },
+};
 
 export default function Home() {
-  const formik = useFormik({
-    initialValues: {
-      processId: "",
-      goal: "both",
-      episodes: 300,
-      includeRedesign: true,
-    },
-    validationSchema,
-    validateOnBlur: true,
-    validateOnChange: true,
-    onSubmit: async (values, { setSubmitting, setStatus }) => {
-      setStatus(null);
-      formik.setFieldValue("data", null, false);
-      try {
-        const result = await fetchProcess(
-          values.processId.trim(),
-          values.goal,
-          values.episodes,
-          values.includeRedesign
-        );
-        if (!result.success) {
-          setStatus({ error: result.message || "Validation failed.", data: result });
-        } else {
-          setStatus({ error: null, data: result });
-        }
-      } catch (err) {
-        setStatus({
-          error: err instanceof Error ? err.message : "Something went wrong reaching the backend.",
-          data: null,
-        });
-      } finally {
-        setSubmitting(false);
-      }
-    },
-  });
+  const [processId, setProcessId] = useState("");
+  const [goal, setGoal] = useState("both");
+  const [episodes, setEpisodes] = useState(300);
+  const [includeRedesign, setIncludeRedesign] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+  const [activeHeuristic, setActiveHeuristic] = useState(null);
 
-  const { values, errors, touched, handleChange, handleBlur, handleSubmit, isSubmitting, status } = formik;
-  const error = status?.error;
-  const data = status?.data;
+  const taskNames = data?.success ? buildTaskNameMap(data.tasks, data.to_be?.tasks) : {};
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!processId.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    setData(null);
+
+    try {
+      const result = await fetchProcess(processId.trim(), goal, episodes, includeRedesign);
+      if (!result.success) {
+        setError(result.message || "Validation failed.");
+        setData(result);
+      } else {
+        setData(result);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong reaching the backend.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#FAFAF9] text-[#12151C]" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -90,7 +146,6 @@ export default function Home() {
 
           <motion.form
             onSubmit={handleSubmit}
-            noValidate
             initial="hidden"
             animate="visible"
             variants={fadeUp}
@@ -103,21 +158,12 @@ export default function Home() {
                 </label>
                 <input
                   type="text"
-                  name="processId"
-                  inputMode="numeric"
-                  value={values.processId}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
+                  value={processId}
+                  onChange={(e) => setProcessId(e.target.value)}
                   placeholder="1972"
-                  className={`w-full rounded-xl border bg-[#FAFAF9] px-4 py-3 text-lg focus:outline-none focus:ring-2 transition-all ${touched.processId && errors.processId
-                      ? "border-red-300 focus:ring-red-200 focus:border-red-400"
-                      : "border-black/10 focus:ring-[#1565C0]/30 focus:border-[#1565C0]"
-                    }`}
+                  className="w-full rounded-xl border border-black/10 bg-[#FAFAF9] px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30 focus:border-[#1565C0] transition-all"
                   style={{ fontFamily: "'IBM Plex Mono', monospace" }}
                 />
-                {touched.processId && errors.processId && (
-                  <p className="text-xs text-red-600 mt-1.5">{errors.processId}</p>
-                )}
               </div>
 
               <div>
@@ -125,10 +171,8 @@ export default function Home() {
                   Goal
                 </label>
                 <select
-                  name="goal"
-                  value={values.goal}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
+                  value={goal}
+                  onChange={(e) => setGoal(e.target.value)}
                   className="rounded-xl border border-black/10 bg-[#FAFAF9] px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30 focus:border-[#1565C0] transition-all"
                 >
                   <option value="both">Time + Cost</option>
@@ -139,10 +183,10 @@ export default function Home() {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="bg-[#12151C] text-white hover:cursor-pointer px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
+                disabled={loading}
+                className="bg-[#12151C] text-white px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
               >
-                {isSubmitting ? "Analyzing…" : "Run"}
+                {loading ? "Analyzing…" : "Run"}
               </button>
             </div>
 
@@ -150,32 +194,23 @@ export default function Home() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  name="includeRedesign"
-                  checked={values.includeRedesign}
-                  onChange={handleChange}
+                  checked={includeRedesign}
+                  onChange={(e) => setIncludeRedesign(e.target.checked)}
                   className="accent-[#1565C0]"
                 />
                 Include redesign
               </label>
-              {values.includeRedesign && (
+              {includeRedesign && (
                 <label className="flex items-center gap-2">
                   Episodes
                   <input
                     type="number"
-                    name="episodes"
-                    value={values.episodes}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
-                    className={`w-20 rounded-lg border bg-[#FAFAF9] px-2 py-1.5 focus:outline-none focus:ring-2 ${touched.episodes && errors.episodes
-                        ? "border-red-300 focus:ring-red-200"
-                        : "border-black/10 focus:ring-[#1565C0]/30"
-                      }`}
+                    value={episodes}
+                    onChange={(e) => setEpisodes(Number(e.target.value))}
+                    className="w-20 rounded-lg border border-black/10 bg-[#FAFAF9] px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30"
                     style={{ fontFamily: "'IBM Plex Mono', monospace" }}
                   />
                 </label>
-              )}
-              {touched.episodes && errors.episodes && (
-                <p className="text-xs text-red-600">{errors.episodes}</p>
               )}
             </div>
           </motion.form>
@@ -198,6 +233,12 @@ export default function Home() {
           <div className="space-y-16 mt-6">
             <Reveal>
               <FlowSummary asIs={data.analysis} toBe={data.to_be} />
+            </Reveal>
+
+            <Reveal>
+              <Section title="Task Reference" accent="#2E7D32">
+                <TaskReference asIsTasks={data.tasks} toBeTasks={data.to_be?.tasks} />
+              </Section>
             </Reveal>
 
             <Reveal>
@@ -237,7 +278,12 @@ export default function Home() {
             {data.redesign_trace && (
               <Reveal>
                 <Section title="Redesign Trace" accent="#B45309">
-                  <RedesignTraceTable trace={data.redesign_trace} />
+                  <p className="text-xs text-[#12151C]/40 mb-3">Click a row to see what this heuristic means.</p>
+                  <RedesignTraceTable
+                    trace={data.redesign_trace}
+                    taskNames={taskNames}
+                    onSelectHeuristic={setActiveHeuristic}
+                  />
                 </Section>
               </Reveal>
             )}
@@ -282,6 +328,11 @@ export default function Home() {
           </motion.div>
         )}
       </div>
+
+      <HeuristicModal
+        heuristic={activeHeuristic}
+        onClose={() => setActiveHeuristic(null)}
+      />
     </main>
   );
 }
@@ -413,7 +464,55 @@ function CriticalPaths({ paths }) {
   );
 }
 
-function RedesignTraceTable({ trace }) {
+function TaskReference({ asIsTasks, toBeTasks }) {
+  if (!asIsTasks?.length) return null;
+
+  const toBeIds = new Set((toBeTasks || []).map((t) => String(t.task_id)));
+  const asIsIds = new Set(asIsTasks.map((t) => String(t.task_id)));
+  const allIds = Array.from(new Set([...asIsIds, ...toBeIds])).sort((a, b) => Number(a) - Number(b));
+  const byId = buildTaskNameMap(asIsTasks, toBeTasks);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(18,21,28,0.06)] border border-black/5 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-black/5 bg-[#12151C]/[0.02]">
+              <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task ID</th>
+              <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task Name</th>
+              <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Present In</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allIds.map((id, i) => (
+              <tr
+                key={id}
+                className={`border-b border-black/5 last:border-0 ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""}`}
+              >
+                <td className="px-6 py-3 font-mono text-xs">{id}</td>
+                <td className="px-4 py-3">{byId[id]}</td>
+                <td className="px-6 py-3 text-xs">
+                  {asIsIds.has(id) && (
+                    <span className="inline-flex items-center gap-1 mr-3 text-[#1565C0]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#1565C0]" /> As-Is
+                    </span>
+                  )}
+                  {toBeIds.has(id) && (
+                    <span className="inline-flex items-center gap-1 text-[#B45309]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#B45309]" /> To-Be
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RedesignTraceTable({ trace, taskNames, onSelectHeuristic }) {
   return (
     <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(18,21,28,0.06)] border border-black/5 overflow-hidden">
       <div className="overflow-x-auto">
@@ -432,15 +531,20 @@ function RedesignTraceTable({ trace }) {
             {trace.map((entry, i) => (
               <tr
                 key={entry.heuristic}
-                className={`border-b border-black/5 last:border-0 hover:bg-[#12151C]/[0.015] transition-colors ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
+                onClick={() => onSelectHeuristic(entry.heuristic)}
+                className={`border-b border-black/5 last:border-0 hover:bg-[#1565C0]/[0.04] transition-colors cursor-pointer ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
                   }`}
               >
-                <td className="px-6 py-4 font-medium">{entry.heuristic}</td>
+                <td className="px-6 py-4 font-medium">
+                  <span className="underline decoration-dotted decoration-[#12151C]/30 underline-offset-4">
+                    {entry.heuristic}
+                  </span>
+                </td>
                 <td className="px-4 py-4">
                   <span
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${entry.implemented
-                      ? "bg-[#2E7D32]/10 text-[#2E7D32]"
-                      : "bg-[#12151C]/6 text-[#12151C]/45"
+                        ? "bg-[#2E7D32]/10 text-[#2E7D32]"
+                        : "bg-[#12151C]/6 text-[#12151C]/45"
                       }`}
                   >
                     <span
@@ -452,7 +556,11 @@ function RedesignTraceTable({ trace }) {
                 </td>
                 <td className="px-4 py-4 text-[#12151C]/60 max-w-xs">
                   {entry.implemented ? (
-                    <span className="font-mono text-xs">{entry.target_task_ids?.join(", ")}</span>
+                    <span className="font-mono text-xs">
+                      {entry.target_task_ids
+                        ?.map((id) => `${id} (${taskNames[id] || "unknown"})`)
+                        .join(", ")}
+                    </span>
                   ) : (
                     <span className="text-xs">{entry.reason}</span>
                   )}
@@ -491,6 +599,92 @@ function RedesignTraceTable({ trace }) {
       </div>
     </div>
   );
+}
+
+function HeuristicModal({ heuristic, onClose }) {
+  const info = heuristic ? HEURISTIC_DEFINITIONS[heuristic] : null;
+
+  return (
+    <AnimatePresence>
+      {info && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-50 flex items-center justify-center px-6"
+          onClick={onClose}
+        >
+          <div className="absolute inset-0 bg-[#12151C]/40 backdrop-blur-sm" />
+
+          <motion.div
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative bg-white rounded-2xl shadow-[0_20px_60px_rgba(18,21,28,0.25)] max-w-lg w-full overflow-hidden"
+          >
+            <div className="h-1.5" style={{ backgroundColor: info.accent }} />
+
+            <div className="p-8">
+              <div className="flex items-start justify-between mb-1">
+                <h3 className="text-2xl font-semibold tracking-tight">{heuristic}</h3>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#12151C]/5 text-[#12151C]/50 hover:text-[#12151C] transition-colors shrink-0 -mt-1 -mr-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p
+                className="text-xs uppercase tracking-wide font-semibold mb-6"
+                style={{ color: info.accent }}
+              >
+                Improves {info.targets}
+              </p>
+
+              <p className="text-xs uppercase tracking-wide text-[#12151C]/45 font-medium mb-2">
+                What it means
+              </p>
+              <p className="text-[15px] text-[#12151C] leading-relaxed italic mb-6">
+                {info.definition}
+              </p>
+
+              <p className="text-xs uppercase tracking-wide text-[#12151C]/45 font-medium mb-2">
+                How our system applies it
+              </p>
+              <p className="text-sm text-[#12151C]/70 leading-relaxed mb-6">
+                {info.rule}
+              </p>
+
+              <div className="rounded-xl bg-[#2E7D32]/[0.06] px-4 py-3">
+                <p className="text-sm font-semibold text-[#2E7D32]">{info.effect}</p>
+              </div>
+
+              {info.note && (
+                <p className="text-xs text-[#12151C]/45 italic mt-4">{info.note}</p>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function buildTaskNameMap(asIsTasks, toBeTasks) {
+  const map = {};
+  (asIsTasks || []).forEach((t) => {
+    map[String(t.task_id)] = t.task_name;
+  });
+  (toBeTasks || []).forEach((t) => {
+    map[String(t.task_id)] = t.task_name;
+  });
+  return map;
 }
 
 function formatStopReason(reason) {
