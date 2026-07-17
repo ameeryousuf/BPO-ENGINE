@@ -104,7 +104,7 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={loading}
-                className="bg-[#12151C] text-white px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
+                className="bg-[#12151C] text-white hover:cursor-pointer px-7 py-3 rounded-xl text-sm font-medium hover:bg-[#1565C0] transition-colors disabled:opacity-40 shadow-sm"
               >
                 {loading ? "Analyzing…" : "Run"}
               </button>
@@ -394,8 +394,8 @@ function RedesignTraceTable({ trace }) {
                 <td className="px-4 py-4">
                   <span
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${entry.implemented
-                        ? "bg-[#2E7D32]/10 text-[#2E7D32]"
-                        : "bg-[#12151C]/6 text-[#12151C]/45"
+                      ? "bg-[#2E7D32]/10 text-[#2E7D32]"
+                      : "bg-[#12151C]/6 text-[#12151C]/45"
                       }`}
                   >
                     <span
