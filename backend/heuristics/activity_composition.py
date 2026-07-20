@@ -1,14 +1,17 @@
+from .config import get_role_entry, SMALL_STEP_MIN
+
 NAME = "Activity Composition"
 
 
-def _responsible_job_id(task):
-    for jt in task.get("jobTasks") or []:
-        if jt.get("role") == "R":
-            return jt.get("job_id")
-    return None
+def _same_r(task_a, task_b):
+    ra = get_role_entry(task_a, "R")
+    rb = get_role_entry(task_b, "R")
+    if ra is None or rb is None:
+        return False
+    return ra.get("job_id") == rb.get("job_id")
 
 
-def _sequential_same_owner_pairs(wp):
+def _pairs(wp):
     pairs = []
     for a, targets in wp.outgoing.items():
         if wp.node_tags.get(a) != "task" or len(targets) != 1:
@@ -16,17 +19,28 @@ def _sequential_same_owner_pairs(wp):
         b = targets[0]
         if wp.node_tags.get(b) != "task" or len(wp.incoming.get(b, [])) != 1:
             continue
-        owner_a = _responsible_job_id(wp.tasks[a])
-        owner_b = _responsible_job_id(wp.tasks[b])
-        if owner_a is not None and owner_a == owner_b:
-            pairs.append((a, b))
+
+        task_a, task_b = wp.tasks[a], wp.tasks[b]
+        if not _same_r(task_a, task_b):
+            continue
+
+        time_a = float(task_a.get("expected_process_time") or 0)
+        time_b = float(task_b.get("expected_process_time") or 0)
+        wait_a = task_a.get("expected_waiting_time")
+
+        if time_a > SMALL_STEP_MIN or time_b > SMALL_STEP_MIN:
+            continue
+        if wait_a not in (0, None):
+            continue
+
+        pairs.append((a, b))
     return pairs
 
 
 def qualify(wp):
-    pairs = _sequential_same_owner_pairs(wp)
+    pairs = _pairs(wp)
     if not pairs:
-        return False, "No two consecutive steps are handled by the same person in a way that could be combined.", []
+        return False, "No two small, back-to-back steps are both handled by the same person with no wait in between.", []
     return True, None, pairs
 
 

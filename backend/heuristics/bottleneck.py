@@ -1,6 +1,18 @@
+from .config import get_role_entry, has_external_authority_reference
+
 NAME = "Bottleneck"
 WAIT_REDUCTION_FACTOR = 0.5
 COST_INCREASE_FACTOR = 1.15
+UTILIZATION_THRESHOLD_PCT = 80
+
+
+def _r_job_utilization(wp, job_id):
+    total = 0.0
+    for task in wp.tasks.values():
+        for jt in task.get("jobTasks") or []:
+            if jt.get("role") == "R" and jt.get("job_id") == job_id:
+                total += float(jt.get("time_allocation_percentage") or 0)
+    return total
 
 
 def _topological_order(wp):
@@ -62,12 +74,22 @@ def _total_time(task):
 
 
 def qualify(wp):
-    candidates = [
-        nid for nid, t in wp.tasks.items()
-        if float(t.get("expected_waiting_time") or 0) > 0
-    ]
+    candidates = []
+    for nid, task in wp.tasks.items():
+        r_entry = get_role_entry(task, "R")
+        utilization_hit = False
+        if r_entry and r_entry.get("job_id") is not None:
+            utilization = _r_job_utilization(wp, r_entry["job_id"])
+            utilization_hit = utilization >= UTILIZATION_THRESHOLD_PCT
+
+        waiting = float(task.get("expected_waiting_time") or 0)
+        wait_hit = waiting > 0 and not has_external_authority_reference(task, wp)
+
+        if utilization_hit or wait_hit:
+            candidates.append(nid)
+
     if not candidates:
-        return False, "No step has any waiting time that extra capacity could actually reduce.", []
+        return False, "No step's owner looks overloaded, and no internal step has a queue that extra staffing would help.", []
     return True, None, candidates
 
 

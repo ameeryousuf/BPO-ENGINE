@@ -1,3 +1,5 @@
+from .config import unique_job_ids
+
 NAME = "Parallelism"
 
 
@@ -9,6 +11,10 @@ def _sequential_pairs(wp):
         b = targets[0]
         if wp.node_tags.get(b) != "task" or len(wp.incoming.get(b, [])) != 1:
             continue
+
+        if unique_job_ids(wp.tasks[a]) & unique_job_ids(wp.tasks[b]):
+            continue
+
         pairs.append((a, b))
     return pairs
 
@@ -16,7 +22,7 @@ def _sequential_pairs(wp):
 def qualify(wp):
     pairs = _sequential_pairs(wp)
     if not pairs:
-        return False, "There are no two neighboring steps that could be safely run at the same time.", []
+        return False, "There are no two neighboring steps, with completely different people involved, that could be safely run at the same time.", []
     return True, None, pairs
 
 

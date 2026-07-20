@@ -1,23 +1,23 @@
 from . import (
-    parallelism,
-    activity_automation,
     activity_elimination,
     activity_composition,
+    activity_automation,
+    parallelism,
+    trusted_party,
     case_based_work,
+    bottleneck,
     empower,
     numerical_involvement,
-    trusted_party,
-    bottleneck,
 )
 
 HEURISTICS = [
-    parallelism,
-    activity_automation,
     activity_elimination,
     activity_composition,
+    activity_automation,
+    parallelism,
+    trusted_party,
     case_based_work,
+    bottleneck,
     empower,
     numerical_involvement,
-    trusted_party,
-    bottleneck,
 ]
