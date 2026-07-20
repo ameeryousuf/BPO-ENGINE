@@ -7,6 +7,7 @@ from . import (
     empower,
     numerical_involvement,
     trusted_party,
+    bottleneck,
 )
 
 HEURISTICS = [
@@ -18,4 +19,5 @@ HEURISTICS = [
     empower,
     numerical_involvement,
     trusted_party,
+    bottleneck,
 ]
