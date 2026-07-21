@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { fetchProcess } from "@/lib/api";
 import { Fragment, useState } from "react";
 
@@ -12,92 +12,15 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
 };
 
-const HEURISTIC_DEFINITIONS = {
-  "Parallelism": {
-    accent: "#1565C0",
-    targets: "TIME",
-    definition:
-      "Run two steps at the same time instead of one after another. Many steps are only done in sequence out of habit or convention, not because one truly depends on the other finishing first.",
-    rule:
-      "Looks for two neighboring steps where the first leads directly into the second, with nothing else branching in between. Picks the pair that saves the most time by running together, then redraws the process so both steps start at the same moment and the flow only continues once both are finished.",
-    effect: "Cuts cycle time. Cost stays the same — the same work still happens, just not one at a time.",
-  },
-  "Activity Automation": {
-    accent: "#B45309",
-    targets: "TIME + COST",
-    definition:
-      "Use technology to do a task faster and more cheaply than a person doing it by hand. Automated steps are quicker, more consistent, and usually cost less per run.",
-    rule:
-      "Any step that still takes measurable time is a candidate. The system picks whichever qualifying step currently takes the longest, then cuts its working time in half and its waiting time in half too.",
-    effect: "Cuts both time and cost, since labor cost is tied to how long a person spends on the step.",
-    note: "The 50% reduction is a planning assumption, not a measured figure — real automation savings vary by task.",
-  },
-  "Activity Elimination": {
-    accent: "#2E7D32",
-    targets: "TIME + COST",
-    definition:
-      "Remove a step entirely if it doesn't add real value. Steps that exist only as a leftover habit, or to double-check something nobody is actually accountable for, can often be dropped.",
-    rule:
-      "A step qualifies if no one is clearly marked as doing the work or answering for the outcome. Among qualifying steps, the system removes the one that currently takes the most time, and reconnects the flow around it.",
-    effect: "Removes all the time and cost tied to that step.",
-    note: "This is a simplifying proxy for \u201cadds no value\u201d — real value judgments are often more nuanced than ownership alone.",
-  },
-  "Activity Composition": {
-    accent: "#1565C0",
-    targets: "TIME",
-    definition:
-      "Combine two small steps into one. When the same person handles both, merging them saves the hand-off and setup time that happens every time work switches from one step to the next.",
-    rule:
-      "Two neighboring steps qualify if the same person is mainly responsible for both. The system merges the pair with the largest estimated setup-time saving into a single new step, combining their time and everyone involved.",
-    effect: "A modest cut to cycle time from avoiding the repeated hand-off. Cost is largely unchanged — it's the same total work, just done in one motion.",
-  },
-  "Case-Based Work": {
-    accent: "#B45309",
-    targets: "TIME",
-    definition:
-      "Stop letting individual cases sit and wait for a scheduled batch run. Some steps only happen on a fixed weekly or monthly cycle, even though the actual work doesn't need to wait that long.",
-    rule:
-      "A step qualifies if it has real waiting time and runs on a weekly or monthly schedule. The system picks whichever qualifying step has the most waiting time built up, and cuts it down to a fifth of what it was.",
-    effect: "A significant cut to cycle time. Cost is unaffected, since waiting time isn't billed labor in this model.",
-  },
-  "Empower": {
-    accent: "#2E7D32",
-    targets: "TIME + COST",
-    definition:
-      "Let the people doing the work make the decision, instead of pausing every time for a manager's sign-off. Removing an unnecessary approval step means less waiting and less overhead.",
-    rule:
-      "A step qualifies if someone is currently listed as the approver. The system picks the step where that approver is the most expensive person to keep in the loop, removes the approval role, and reduces waiting time by a fifth.",
-    effect: "Cuts both time (less waiting for sign-off) and cost (fewer people billing time to the step).",
-  },
-  "Numerical Involvement": {
-    accent: "#1565C0",
-    targets: "TIME",
-    definition:
-      "Fewer people, fewer hand-offs. When a step loops in more people than it needs — often just to keep them informed — the coordination itself adds delay.",
-    rule:
-      "A step qualifies if more than two people are attached to it. The system picks the step with the most people involved, removes everyone who is only being kept informed, and trims waiting time slightly for each person removed.",
-    effect: "A modest cut to cycle time. Cost stays roughly the same, since informed-only roles typically weren't driving the cost.",
-  },
-  "Trusted Party": {
-    accent: "#B45309",
-    targets: "TIME + COST",
-    definition:
-      "Accept a result someone else already produced instead of redoing the same check yourself. If a trusted outside organization already verified something, re-verifying it from scratch usually just adds delay and cost.",
-    rule:
-      "A step qualifies if it involves an unusually long wait — a day or more. The system picks whichever qualifying step has the longest wait, cuts its waiting time down to a tenth, and reduces its own working time too.",
-    effect: "A large cut to cycle time, plus a meaningful cut to cost from the reduced verification work.",
-  },
-};
 
 export default function Home() {
-  const [processId, setProcessId] = useState("");
+  const [processId, setProcessId] = useState("1972");
   const [goal, setGoal] = useState("both");
   const [episodes, setEpisodes] = useState(300);
   const [includeRedesign, setIncludeRedesign] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
-  const [activeHeuristic, setActiveHeuristic] = useState(null);
 
   const taskNames = data?.success ? buildTaskNameMap(data.tasks, data.to_be?.tasks) : {};
 
@@ -127,8 +50,8 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#FAFAF9] text-[#12151C]" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <div className="relative overflow-hidden">
-        <div className="pointer-events-none absolute -top-40 -left-40 w-[500px] h-[500px] rounded-full bg-[#1565C0]/10 blur-3xl" />
-        <div className="pointer-events-none absolute -top-20 right-0 w-[400px] h-[400px] rounded-full bg-[#B45309]/10 blur-3xl" />
+        <div className="pointer-events-none absolute -top-40 -left-40 w-125 h-125 rounded-full bg-[#1565C0]/10 blur-3xl" />
+        <div className="pointer-events-none absolute -top-20 right-0 w-100 h-100 rounded-full bg-[#B45309]/10 blur-3xl" />
 
         <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-10">
           <motion.header initial="hidden" animate="visible" variants={fadeUp} className="mb-14 max-w-2xl">
@@ -282,7 +205,6 @@ export default function Home() {
                   <RedesignTraceTable
                     trace={data.redesign_trace}
                     taskNames={taskNames}
-                    onSelectHeuristic={setActiveHeuristic}
                   />
                 </Section>
               </Reveal>
@@ -328,11 +250,6 @@ export default function Home() {
           </motion.div>
         )}
       </div>
-
-      <HeuristicModal
-        heuristic={activeHeuristic}
-        onClose={() => setActiveHeuristic(null)}
-      />
     </main>
   );
 }
@@ -375,7 +292,7 @@ function FlowSummary({ asIs, toBe }) {
 
       <div className="relative h-2 bg-[#12151C]/5 rounded-full overflow-hidden">
         <motion.div
-          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[#1565C0] to-[#B45309]"
+          className="absolute inset-y-0 left-0 rounded-full bg-linear-to-r from-[#1565C0] to-[#B45309]"
           initial={{ width: "0%" }}
           whileInView={{ width: "100%" }}
           viewport={{ once: true }}
@@ -481,7 +398,7 @@ function TaskReference({ asIsTasks, toBeTasks }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-black/5 bg-[#12151C]/[0.02]">
+            <tr className="border-b border-black/5 bg-[#12151C]/2">
               <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task ID</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task Name</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Present In</th>
@@ -496,7 +413,7 @@ function TaskReference({ asIsTasks, toBeTasks }) {
                 <Fragment key={id}>
                   <tr
                     onClick={() => setExpandedId(isOpen ? null : id)}
-                    className={`border-b border-black/5 last:border-0 cursor-pointer hover:bg-[#1565C0]/[0.04] transition-colors ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
+                    className={`border-b border-black/5 last:border-0 cursor-pointer hover:bg-[#1565C0]/4 transition-colors ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
                       }`}
                   >
                     <td className="px-6 py-3 font-mono text-xs">{id}</td>
@@ -519,7 +436,7 @@ function TaskReference({ asIsTasks, toBeTasks }) {
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={4} className="px-6 py-4 bg-[#12151C]/[0.015]">
+                      <td colSpan={4} className="px-6 py-4 bg-[#12151C]/1.5">
                         <RaciTable raci={task.raci} />
                       </td>
                     </tr>
@@ -583,7 +500,7 @@ function RedesignTraceTable({ trace, taskNames, onSelectHeuristic }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-black/5 bg-[#12151C]/[0.02]">
+            <tr className="border-b border-black/5 bg-[#12151C]/2">
               <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Heuristic</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Status</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Tasks / Reason</th>
@@ -596,8 +513,7 @@ function RedesignTraceTable({ trace, taskNames, onSelectHeuristic }) {
             {trace.map((entry, i) => (
               <tr
                 key={entry.heuristic}
-                onClick={() => onSelectHeuristic(entry.heuristic)}
-                className={`border-b border-black/5 last:border-0 hover:bg-[#1565C0]/[0.04] transition-colors cursor-pointer ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
+                className={`border-b border-black/5 last:border-0 hover:bg-[#1565C0]/4 transition-colors cursor-pointer ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
                   }`}
               >
                 <td className="px-6 py-4 font-medium">
@@ -663,81 +579,6 @@ function RedesignTraceTable({ trace, taskNames, onSelectHeuristic }) {
         </table>
       </div>
     </div>
-  );
-}
-
-function HeuristicModal({ heuristic, onClose }) {
-  const info = heuristic ? HEURISTIC_DEFINITIONS[heuristic] : null;
-
-  return (
-    <AnimatePresence>
-      {info && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex items-center justify-center px-6"
-          onClick={onClose}
-        >
-          <div className="absolute inset-0 bg-[#12151C]/40 backdrop-blur-sm" />
-
-          <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.98 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-            onClick={(e) => e.stopPropagation()}
-            className="relative bg-white rounded-2xl shadow-[0_20px_60px_rgba(18,21,28,0.25)] max-w-lg w-full overflow-hidden"
-          >
-            <div className="h-1.5" style={{ backgroundColor: info.accent }} />
-
-            <div className="p-8">
-              <div className="flex items-start justify-between mb-1">
-                <h3 className="text-2xl font-semibold tracking-tight">{heuristic}</h3>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="Close"
-                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#12151C]/5 text-[#12151C]/50 hover:text-[#12151C] transition-colors shrink-0 -mt-1 -mr-1"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <p
-                className="text-xs uppercase tracking-wide font-semibold mb-6"
-                style={{ color: info.accent }}
-              >
-                Improves {info.targets}
-              </p>
-
-              <p className="text-xs uppercase tracking-wide text-[#12151C]/45 font-medium mb-2">
-                What it means
-              </p>
-              <p className="text-[15px] text-[#12151C] leading-relaxed italic mb-6">
-                {info.definition}
-              </p>
-
-              <p className="text-xs uppercase tracking-wide text-[#12151C]/45 font-medium mb-2">
-                How our system applies it
-              </p>
-              <p className="text-sm text-[#12151C]/70 leading-relaxed mb-6">
-                {info.rule}
-              </p>
-
-              <div className="rounded-xl bg-[#2E7D32]/[0.06] px-4 py-3">
-                <p className="text-sm font-semibold text-[#2E7D32]">{info.effect}</p>
-              </div>
-
-              {info.note && (
-                <p className="text-xs text-[#12151C]/45 italic mt-4">{info.note}</p>
-              )}
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
   );
 }
 
