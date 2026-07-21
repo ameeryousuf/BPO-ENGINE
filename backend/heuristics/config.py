@@ -121,3 +121,14 @@ def is_pass_fail_gateway(wp, gateway_node):
     if not all(conditions):
         return False
     return all(c in PASS_FAIL_WORDS for c in conditions)
+
+def target_rule_results(rule_fns, item):
+    return [{"rule": name, "passed": bool(fn(item))} for name, fn in rule_fns]
+
+
+def existential_rule_results(rule_fns, items):
+    results = []
+    for name, fn in rule_fns:
+        passed = any(fn(item) for item in items) if items else False
+        results.append({"rule": name, "passed": passed})
+    return results

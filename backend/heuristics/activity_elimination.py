@@ -1,4 +1,4 @@
-from .config import get_role_entry, NEGLIGIBLE_PCT
+from .config import get_role_entry, NEGLIGIBLE_PCT, target_rule_results, existential_rule_results
 
 NAME = "Activity Elimination"
 
@@ -13,15 +13,18 @@ def _is_gateway_adjacent(wp, node_id):
     return False
 
 
+def _no_real_owner(task):
+    r_entry = get_role_entry(task, "R")
+    a_entry = get_role_entry(task, "A")
+    no_owner = r_entry is None and a_entry is None
+    negligible_r = r_entry is not None and float(r_entry.get("time_allocation_percentage") or 0) <= NEGLIGIBLE_PCT
+    return no_owner or negligible_r
+
+
 def qualify(wp):
     candidates = []
     for nid, task in wp.tasks.items():
-        r_entry = get_role_entry(task, "R")
-        a_entry = get_role_entry(task, "A")
-        no_owner = r_entry is None and a_entry is None
-        negligible_r = r_entry is not None and float(r_entry.get("time_allocation_percentage") or 0) <= NEGLIGIBLE_PCT
-
-        if not (no_owner or negligible_r):
+        if not _no_real_owner(task):
             continue
         if _is_gateway_adjacent(wp, nid):
             continue
@@ -43,3 +46,13 @@ def apply(wp, target):
     removed = target.replace("Activity_", "")
     wp.remove_node(target)
     return [removed]
+
+
+def rule_checks(wp, target=None):
+    rule_fns = [
+        ("No clear Responsible/Accountable owner", lambda nid: _no_real_owner(wp.tasks[nid])),
+        ("Not directly next to a decision gateway", lambda nid: not _is_gateway_adjacent(wp, nid)),
+    ]
+    if target is not None:
+        return target_rule_results(rule_fns, target)
+    return existential_rule_results(rule_fns, list(wp.tasks.keys()))

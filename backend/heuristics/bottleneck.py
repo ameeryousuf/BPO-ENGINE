@@ -1,4 +1,4 @@
-from .config import get_role_entry, has_external_authority_reference
+from .config import get_role_entry, has_external_authority_reference, target_rule_results, existential_rule_results
 
 NAME = "Bottleneck"
 WAIT_REDUCTION_FACTOR = 0.5
@@ -13,6 +13,18 @@ def _r_job_utilization(wp, job_id):
             if jt.get("role") == "R" and jt.get("job_id") == job_id:
                 total += float(jt.get("time_allocation_percentage") or 0)
     return total
+
+
+def _utilization_hit(task, wp):
+    r_entry = get_role_entry(task, "R")
+    if r_entry is None or r_entry.get("job_id") is None:
+        return False
+    return _r_job_utilization(wp, r_entry["job_id"]) >= UTILIZATION_THRESHOLD_PCT
+
+
+def _internal_wait_hit(task, wp):
+    waiting = float(task.get("expected_waiting_time") or 0)
+    return waiting > 0 and not has_external_authority_reference(task, wp)
 
 
 def _topological_order(wp):
@@ -76,16 +88,7 @@ def _total_time(task):
 def qualify(wp):
     candidates = []
     for nid, task in wp.tasks.items():
-        r_entry = get_role_entry(task, "R")
-        utilization_hit = False
-        if r_entry and r_entry.get("job_id") is not None:
-            utilization = _r_job_utilization(wp, r_entry["job_id"])
-            utilization_hit = utilization >= UTILIZATION_THRESHOLD_PCT
-
-        waiting = float(task.get("expected_waiting_time") or 0)
-        wait_hit = waiting > 0 and not has_external_authority_reference(task, wp)
-
-        if utilization_hit or wait_hit:
+        if _utilization_hit(task, wp) or _internal_wait_hit(task, wp):
             candidates.append(nid)
 
     if not candidates:
@@ -113,3 +116,13 @@ def apply(wp, target):
                 job["hourlyRate"] = float(job["hourlyRate"]) * COST_INCREASE_FACTOR
 
     return [target.replace("Activity_", "")]
+
+
+def rule_checks(wp, target=None):
+    rule_fns = [
+        ("Responsible person is over 80% utilized process-wide", lambda nid: _utilization_hit(wp.tasks[nid], wp)),
+        ("Has an internal queue extra staff could relieve", lambda nid: _internal_wait_hit(wp.tasks[nid], wp)),
+    ]
+    if target is not None:
+        return target_rule_results(rule_fns, target[0] if isinstance(target, list) else target)
+    return existential_rule_results(rule_fns, list(wp.tasks.keys()))

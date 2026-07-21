@@ -1,4 +1,4 @@
-from .config import get_role_entry, SMALL_STEP_MIN
+from .config import get_role_entry, SMALL_STEP_MIN, target_rule_results, existential_rule_results
 
 NAME = "Activity Composition"
 
@@ -11,7 +11,7 @@ def _same_r(task_a, task_b):
     return ra.get("job_id") == rb.get("job_id")
 
 
-def _pairs(wp):
+def _all_adjacent_pairs(wp):
     pairs = []
     for a, targets in wp.outgoing.items():
         if wp.node_tags.get(a) != "task" or len(targets) != 1:
@@ -19,20 +19,32 @@ def _pairs(wp):
         b = targets[0]
         if wp.node_tags.get(b) != "task" or len(wp.incoming.get(b, [])) != 1:
             continue
+        pairs.append((a, b))
+    return pairs
 
-        task_a, task_b = wp.tasks[a], wp.tasks[b]
-        if not _same_r(task_a, task_b):
+
+def _both_small(pair, wp):
+    a, b = pair
+    time_a = float(wp.tasks[a].get("expected_process_time") or 0)
+    time_b = float(wp.tasks[b].get("expected_process_time") or 0)
+    return time_a <= SMALL_STEP_MIN and time_b <= SMALL_STEP_MIN
+
+
+def _no_wait_between(pair, wp):
+    a, _ = pair
+    wait_a = wp.tasks[a].get("expected_waiting_time")
+    return wait_a in (0, None)
+
+
+def _pairs(wp):
+    pairs = []
+    for a, b in _all_adjacent_pairs(wp):
+        if not _same_r(wp.tasks[a], wp.tasks[b]):
             continue
-
-        time_a = float(task_a.get("expected_process_time") or 0)
-        time_b = float(task_b.get("expected_process_time") or 0)
-        wait_a = task_a.get("expected_waiting_time")
-
-        if time_a > SMALL_STEP_MIN or time_b > SMALL_STEP_MIN:
+        if not _both_small((a, b), wp):
             continue
-        if wait_a not in (0, None):
+        if not _no_wait_between((a, b), wp):
             continue
-
         pairs.append((a, b))
     return pairs
 
@@ -94,3 +106,14 @@ def apply(wp, target):
         wp.incoming.pop(nid, None)
 
     return [merged_id.replace("Activity_", "")]
+
+
+def rule_checks(wp, target=None):
+    rule_fns = [
+        ("Same person Responsible for both steps", lambda pair: _same_r(wp.tasks[pair[0]], wp.tasks[pair[1]])),
+        ("Both steps are small enough to merge", lambda pair: _both_small(pair, wp)),
+        ("No waiting time between the two steps", lambda pair: _no_wait_between(pair, wp)),
+    ]
+    if target is not None:
+        return target_rule_results(rule_fns, target)
+    return existential_rule_results(rule_fns, _all_adjacent_pairs(wp))

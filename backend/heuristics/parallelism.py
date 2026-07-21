@@ -1,9 +1,21 @@
-from .config import unique_job_ids
+from .config import unique_job_ids, target_rule_results, existential_rule_results
 
 NAME = "Parallelism"
 
 
-def _sequential_pairs(wp):
+def _is_simple_sequence_pair(a, b, wp):
+    if wp.node_tags.get(a) != "task" or wp.node_tags.get(b) != "task":
+        return False
+    if len(wp.outgoing.get(a, [])) != 1 or len(wp.incoming.get(b, [])) != 1:
+        return False
+    return True
+
+
+def _no_shared_people(a, b, wp):
+    return not (unique_job_ids(wp.tasks[a]) & unique_job_ids(wp.tasks[b]))
+
+
+def _all_adjacent_task_pairs(wp):
     pairs = []
     for a, targets in wp.outgoing.items():
         if wp.node_tags.get(a) != "task" or len(targets) != 1:
@@ -11,12 +23,12 @@ def _sequential_pairs(wp):
         b = targets[0]
         if wp.node_tags.get(b) != "task" or len(wp.incoming.get(b, [])) != 1:
             continue
-
-        if unique_job_ids(wp.tasks[a]) & unique_job_ids(wp.tasks[b]):
-            continue
-
         pairs.append((a, b))
     return pairs
+
+
+def _sequential_pairs(wp):
+    return [(a, b) for a, b in _all_adjacent_task_pairs(wp) if _no_shared_people(a, b, wp)]
 
 
 def qualify(wp):
@@ -55,3 +67,13 @@ def apply(wp, target):
     wp.connect(join_id, succ)
 
     return [a.replace("Activity_", ""), b.replace("Activity_", "")]
+
+
+def rule_checks(wp, target=None):
+    rule_fns = [
+        ("Simple back-to-back sequence (no branching)", lambda pair: _is_simple_sequence_pair(pair[0], pair[1], wp)),
+        ("No people are shared between the two steps", lambda pair: _no_shared_people(pair[0], pair[1], wp)),
+    ]
+    if target is not None:
+        return target_rule_results(rule_fns, target)
+    return existential_rule_results(rule_fns, _all_adjacent_task_pairs(wp))

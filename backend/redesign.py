@@ -11,20 +11,6 @@ from q_learning import train_q_table
 
 MAX_STEPS = 8
 
-def _build_raci(task):
-    raci = []
-    for jt in task.get("jobTasks") or []:
-        job = jt.get("job") or {}
-        raci.append({
-            "role": jt.get("role"),
-            "job_name": job.get("name", "Unknown"),
-            "hourly_rate": job.get("hourlyRate"),
-            "currency": job.get("currencyType", "PKR"),
-            "time_allocation_percentage": jt.get("time_allocation_percentage"),
-        })
-    return raci
-
-
 
 def _metrics_dict(process_json):
     analysis = analyze_process(process_json)
@@ -48,6 +34,25 @@ def _metrics_dict(process_json):
         "critical_paths": critical_paths,
         "tasks": tasks,
     }, analysis
+
+
+def _build_raci(task):
+    raci = []
+    for jt in task.get("jobTasks") or []:
+        job = jt.get("job") or {}
+        raci.append({
+            "role": jt.get("role"),
+            "job_name": job.get("name", "Unknown"),
+            "hourly_rate": job.get("hourlyRate"),
+            "currency": job.get("currencyType", "PKR"),
+            "time_allocation_percentage": jt.get("time_allocation_percentage"),
+        })
+    return raci
+
+
+def _rules_for(heuristic, wp, ok, candidates):
+    target_for_rules = heuristic.select_target(wp, candidates) if ok else None
+    return heuristic.rule_checks(wp, target_for_rules)
 
 
 def redesign_process(process_data: dict, goal_param: str, episodes: int = 300) -> dict:
@@ -74,10 +79,17 @@ def redesign_process(process_data: dict, goal_param: str, episodes: int = 300) -
             if h.NAME in used:
                 continue
             ok, reason, candidates = h.qualify(wp)
+            rules = _rules_for(h, wp, ok, candidates)
             if ok:
                 qualifying.append((h, candidates))
+                trace_by_name[h.NAME] = {
+                    "heuristic": h.NAME,
+                    "implemented": False,
+                    "reason": "This could have helped, but the redesign process hasn't reached it yet.",
+                    "rules": rules,
+                }
             else:
-                trace_by_name[h.NAME] = {"heuristic": h.NAME, "implemented": False, "reason": reason}
+                trace_by_name[h.NAME] = {"heuristic": h.NAME, "implemented": False, "reason": reason, "rules": rules}
 
         if not qualifying:
             stop_reason = "no_qualifying_heuristics"
@@ -89,15 +101,18 @@ def redesign_process(process_data: dict, goal_param: str, episodes: int = 300) -
 
         if best_q <= 0 and any(v > 0 for v in Q.values()):
             stop_reason = "non_positive_q_value"
-            for h, _ in qualifying:
+            for h, candidates in qualifying:
+                rules = _rules_for(h, wp, True, candidates)
                 trace_by_name[h.NAME] = {
                     "heuristic": h.NAME,
                     "implemented": False,
                     "reason": "This change was considered, but it was not expected to help enough to be worth applying.",
+                    "rules": rules,
                 }
             break
 
         target = best_heuristic.select_target(wp, best_candidates)
+        rules = best_heuristic.rule_checks(wp, target)
         before = {"cycle_time": current_ct, "resource_cost": current_cost}
         affected = best_heuristic.apply(wp, target)
         used.add(best_heuristic.NAME)
@@ -114,21 +129,24 @@ def redesign_process(process_data: dict, goal_param: str, episodes: int = 300) -
             "before": before,
             "after": {"cycle_time": current_ct, "resource_cost": current_cost},
             "reward": reward_info,
+            "rules": rules,
         }
     else:
         stop_reason = "max_steps_reached"
 
     for h in HEURISTICS:
         if h.NAME not in trace_by_name:
-            ok, reason, _ = h.qualify(wp)
+            ok, reason, candidates = h.qualify(wp)
+            rules = _rules_for(h, wp, ok, candidates)
             if ok:
                 trace_by_name[h.NAME] = {
                     "heuristic": h.NAME,
                     "implemented": False,
                     "reason": "This could have helped, but the redesign process stopped before reaching it.",
+                    "rules": rules,
                 }
             else:
-                trace_by_name[h.NAME] = {"heuristic": h.NAME, "implemented": False, "reason": reason}
+                trace_by_name[h.NAME] = {"heuristic": h.NAME, "implemented": False, "reason": reason, "rules": rules}
 
     redesign_trace = [trace_by_name[h.NAME] for h in HEURISTICS]
 
@@ -152,7 +170,7 @@ def redesign_process(process_data: dict, goal_param: str, episodes: int = 300) -
         "overall_improvement": {
             "time_improvement_pct": overall["time_improvement_pct"],
             "cost_improvement_pct": overall["cost_improvement_pct"],
-            "total_reward": overall["reward"],
+            "total_reward": overall.get("reward_percentage", overall.get("reward")),
         },
         "redesign_trace": redesign_trace,
         "stop_reason": stop_reason,

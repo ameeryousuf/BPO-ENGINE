@@ -1,6 +1,15 @@
-from .config import has_external_authority_reference, is_pass_fail_gateway, successor_of
+from .config import has_external_authority_reference, is_pass_fail_gateway, successor_of, target_rule_results, existential_rule_results
 
 NAME = "Trusted Party"
+
+
+def _has_wait(task):
+    return float(task.get("expected_waiting_time") or 0) > 0
+
+
+def _leads_to_pass_fail(nid, wp):
+    gw_node = successor_of(wp, nid)
+    return gw_node is not None and gw_node in wp.gateways and is_pass_fail_gateway(wp, gw_node)
 
 
 def qualify(wp):
@@ -8,13 +17,10 @@ def qualify(wp):
     for nid, task in wp.tasks.items():
         if not has_external_authority_reference(task, wp):
             continue
-        if float(task.get("expected_waiting_time") or 0) <= 0:
+        if not _has_wait(task):
             continue
-
-        gw_node = successor_of(wp, nid)
-        if gw_node is None or gw_node not in wp.gateways or not is_pass_fail_gateway(wp, gw_node):
+        if not _leads_to_pass_fail(nid, wp):
             continue
-
         candidates.append(nid)
 
     if not candidates:
@@ -31,3 +37,14 @@ def apply(wp, target):
     task["expected_waiting_time"] = float(task.get("expected_waiting_time") or 0) * 0.1
     task["expected_process_time"] = float(task.get("expected_process_time") or 0) * 0.7
     return [target.replace("Activity_", "")]
+
+
+def rule_checks(wp, target=None):
+    rule_fns = [
+        ("References an authority outside the company", lambda nid: has_external_authority_reference(wp.tasks[nid], wp)),
+        ("Has real waiting time", lambda nid: _has_wait(wp.tasks[nid])),
+        ("Leads to a simple pass/fail decision", lambda nid: _leads_to_pass_fail(nid, wp)),
+    ]
+    if target is not None:
+        return target_rule_results(rule_fns, target[0] if isinstance(target, list) else target)
+    return existential_rule_results(rule_fns, list(wp.tasks.keys()))
