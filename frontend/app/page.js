@@ -12,7 +12,6 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
 };
 
-
 export default function Home() {
   const [processId, setProcessId] = useState("1972");
   const [goal, setGoal] = useState("both");
@@ -50,8 +49,8 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#FAFAF9] text-[#12151C]" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <div className="relative overflow-hidden">
-        <div className="pointer-events-none absolute -top-40 -left-40 w-125 h-125 rounded-full bg-[#1565C0]/10 blur-3xl" />
-        <div className="pointer-events-none absolute -top-20 right-0 w-100 h-100 rounded-full bg-[#B45309]/10 blur-3xl" />
+        <div className="pointer-events-none absolute -top-40 -left-40 w-[500px] h-[500px] rounded-full bg-[#1565C0]/10 blur-3xl" />
+        <div className="pointer-events-none absolute -top-20 right-0 w-[400px] h-[400px] rounded-full bg-[#B45309]/10 blur-3xl" />
 
         <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-10">
           <motion.header initial="hidden" animate="visible" variants={fadeUp} className="mb-14 max-w-2xl">
@@ -201,11 +200,8 @@ export default function Home() {
             {data.redesign_trace && (
               <Reveal>
                 <Section title="Redesign Trace" accent="#B45309">
-                  <p className="text-xs text-[#12151C]/40 mb-3">Click a row to see what this heuristic means.</p>
-                  <RedesignTraceTable
-                    trace={data.redesign_trace}
-                    taskNames={taskNames}
-                  />
+                  <p className="text-xs text-[#12151C]/40 mb-3">Click a row to see the rules that were checked.</p>
+                  <RedesignTraceTable trace={data.redesign_trace} taskNames={taskNames} />
                 </Section>
               </Reveal>
             )}
@@ -292,7 +288,7 @@ function FlowSummary({ asIs, toBe }) {
 
       <div className="relative h-2 bg-[#12151C]/5 rounded-full overflow-hidden">
         <motion.div
-          className="absolute inset-y-0 left-0 rounded-full bg-linear-to-r from-[#1565C0] to-[#B45309]"
+          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[#1565C0] to-[#B45309]"
           initial={{ width: "0%" }}
           whileInView={{ width: "100%" }}
           viewport={{ once: true }}
@@ -398,7 +394,7 @@ function TaskReference({ asIsTasks, toBeTasks }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-black/5 bg-[#12151C]/2">
+            <tr className="border-b border-black/5 bg-[#12151C]/[0.02]">
               <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task ID</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Task Name</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Present In</th>
@@ -413,7 +409,7 @@ function TaskReference({ asIsTasks, toBeTasks }) {
                 <Fragment key={id}>
                   <tr
                     onClick={() => setExpandedId(isOpen ? null : id)}
-                    className={`border-b border-black/5 last:border-0 cursor-pointer hover:bg-[#1565C0]/4 transition-colors ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
+                    className={`border-b border-black/5 last:border-0 cursor-pointer hover:bg-[#1565C0]/[0.04] transition-colors ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
                       }`}
                   >
                     <td className="px-6 py-3 font-mono text-xs">{id}</td>
@@ -436,7 +432,7 @@ function TaskReference({ asIsTasks, toBeTasks }) {
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={4} className="px-6 py-4 bg-[#12151C]/1.5">
+                      <td colSpan={4} className="px-6 py-4 bg-[#12151C]/[0.015]">
                         <RaciTable raci={task.raci} />
                       </td>
                     </tr>
@@ -494,91 +490,134 @@ function RaciTable({ raci }) {
   );
 }
 
-function RedesignTraceTable({ trace, taskNames, onSelectHeuristic }) {
+function RedesignTraceTable({ trace, taskNames }) {
+  const [expandedHeuristic, setExpandedHeuristic] = useState(null);
+
   return (
     <div className="bg-white rounded-2xl shadow-[0_2px_20px_rgba(18,21,28,0.06)] border border-black/5 overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-black/5 bg-[#12151C]/2">
+            <tr className="border-b border-black/5 bg-[#12151C]/[0.02]">
               <th className="text-left px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Heuristic</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Status</th>
               <th className="text-left px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Tasks / Reason</th>
               <th className="text-right px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Cycle Time</th>
               <th className="text-right px-4 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Resource Cost</th>
-              <th className="text-right px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Reward</th>
+              <th className="text-right px-2 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Reward</th>
+              <th className="text-right px-6 py-3.5 text-xs uppercase tracking-wide text-[#12151C]/45 font-medium">Rules</th>
             </tr>
           </thead>
           <tbody>
-            {trace.map((entry, i) => (
-              <tr
-                key={entry.heuristic}
-                className={`border-b border-black/5 last:border-0 hover:bg-[#1565C0]/4 transition-colors cursor-pointer ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
-                  }`}
-              >
-                <td className="px-6 py-4 font-medium">
-                  <span className="underline decoration-dotted decoration-[#12151C]/30 underline-offset-4">
-                    {entry.heuristic}
-                  </span>
-                </td>
-                <td className="px-4 py-4">
-                  <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${entry.implemented
-                      ? "bg-[#2E7D32]/10 text-[#2E7D32]"
-                      : "bg-[#12151C]/6 text-[#12151C]/45"
+            {trace.map((entry, i) => {
+              const isOpen = expandedHeuristic === entry.heuristic;
+              const passedCount = (entry.rules || []).filter((r) => r.passed).length;
+              const totalRules = (entry.rules || []).length;
+
+              return (
+                <Fragment key={entry.heuristic}>
+                  <tr
+                    onClick={() => setExpandedHeuristic(isOpen ? null : entry.heuristic)}
+                    className={`border-b border-black/5 last:border-0 hover:bg-[#1565C0]/[0.04] transition-colors cursor-pointer ${i % 2 === 1 ? "bg-[#12151C]/[0.008]" : ""
                       }`}
                   >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: entry.implemented ? "#2E7D32" : "#12151C55" }}
-                    />
-                    {entry.implemented ? "Applied" : "Skipped"}
-                  </span>
-                </td>
-                <td className="px-4 py-4 text-[#12151C]/60 max-w-xs">
-                  {entry.implemented ? (
-                    <span className="font-mono text-xs">
-                      {entry.target_task_ids
-                        ?.map((id) => `${id} (${taskNames[id] || "unknown"})`)
-                        .join(", ")}
-                    </span>
-                  ) : (
-                    <span className="text-xs">{entry.reason}</span>
+                    <td className="px-6 py-4 font-medium">{entry.heuristic}</td>
+                    <td className="px-4 py-4">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${entry.implemented
+                          ? "bg-[#2E7D32]/10 text-[#2E7D32]"
+                          : "bg-[#12151C]/6 text-[#12151C]/45"
+                          }`}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: entry.implemented ? "#2E7D32" : "#12151C55" }}
+                        />
+                        {entry.implemented ? "Applied" : "Skipped"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-[#12151C]/60 max-w-xs">
+                      {entry.implemented ? (
+                        <span className="font-mono text-xs">
+                          {entry.target_task_ids
+                            ?.map((id) => `${id} (${taskNames[id] || "unknown"})`)
+                            .join(", ")}
+                        </span>
+                      ) : (
+                        <span className="text-xs">{entry.reason}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-right font-mono text-xs">
+                      {entry.implemented ? (
+                        <>
+                          {entry.before?.cycle_time} <span className="text-[#12151C]/30">→</span> {entry.after?.cycle_time}
+                        </>
+                      ) : (
+                        <span className="text-[#12151C]/30">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-right font-mono text-xs">
+                      {entry.implemented ? (
+                        <>
+                          {entry.before?.resource_cost} <span className="text-[#12151C]/30">→</span> {entry.after?.resource_cost}
+                        </>
+                      ) : (
+                        <span className="text-[#12151C]/30">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-4 text-right">
+                      {entry.implemented && entry.reward ? (
+                        <span className="font-mono text-xs font-semibold text-[#2E7D32]">
+                          +{formatPct(getEntryReward(entry.reward))}
+                        </span>
+                      ) : (
+                        <span className="text-[#12151C]/30 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {totalRules > 0 && (
+                        <span className="text-xs font-mono text-[#12151C]/45">
+                          {passedCount}/{totalRules} {isOpen ? "▲" : "▼"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-4 bg-[#12151C]/[0.015]">
+                        <RulesList rules={entry.rules} />
+                      </td>
+                    </tr>
                   )}
-                </td>
-                <td className="px-4 py-4 text-right font-mono text-xs">
-                  {entry.implemented ? (
-                    <>
-                      {entry.before?.cycle_time} <span className="text-[#12151C]/30">→</span> {entry.after?.cycle_time}
-                    </>
-                  ) : (
-                    <span className="text-[#12151C]/30">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-4 text-right font-mono text-xs">
-                  {entry.implemented ? (
-                    <>
-                      {entry.before?.resource_cost} <span className="text-[#12151C]/30">→</span> {entry.after?.resource_cost}
-                    </>
-                  ) : (
-                    <span className="text-[#12151C]/30">—</span>
-                  )}
-                </td>
-                <td className="px-6 py-4 text-right">
-                  {entry.implemented && entry.reward ? (
-                    <span className="font-mono text-xs font-semibold text-[#2E7D32]">
-                      +{formatPct(getEntryReward(entry.reward))}
-                    </span>
-                  ) : (
-                    <span className="text-[#12151C]/30 text-xs">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function RulesList({ rules }) {
+  if (!rules || rules.length === 0) {
+    return <p className="text-xs text-[#12151C]/45">No rule checks recorded for this heuristic.</p>;
+  }
+
+  return (
+    <ul className="space-y-2">
+      {rules.map((r, i) => (
+        <li key={i} className="flex items-center gap-2.5 text-sm">
+          <span
+            className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${r.passed ? "bg-[#2E7D32]/15 text-[#2E7D32]" : "bg-red-500/10 text-red-600"
+              }`}
+          >
+            {r.passed ? "✓" : "✕"}
+          </span>
+          <span className={r.passed ? "text-[#12151C]/80" : "text-[#12151C]/50"}>{r.rule}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
